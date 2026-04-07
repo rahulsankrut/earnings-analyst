@@ -1,0 +1,22 @@
+{
+  "state": {
+    "analyst_profiles": [
+      {
+        "name": "Analyst 1",
+        "firm": "Firm 1",
+        "tone": "Probing",
+        "topics": ["Margins", "Supply Chain"]
+      },
+      {
+        "name": "Analyst 2",
+        "firm": "Firm 2",
+        "tone": "Strategic",
+        "topics": ["M&A", "Growth"]
+      }
+    ],
+    "historical_trends": [
+      "Margin expansion in Q3 2025 due to cost cutting.",
+      "Revenue growth in APAC region."
+    ]
+  }
+}
