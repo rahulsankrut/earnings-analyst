@@ -11,10 +11,10 @@ from google.cloud import discoveryengine_v1 as discoveryengine
 
 logger = logging.getLogger(__name__)
 
-PROJECT_ID = os.environ["GOOGLE_CLOUD_PROJECT"]
+PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 DATA_STORE_LOCATION = os.environ.get("DATA_STORE_LOCATION", "global")
-EARNINGS_DATA_STORE_ID = os.environ["EARNINGS_DATA_STORE_ID"]
-COMPETITOR_DATA_STORE_ID = os.environ["COMPETITOR_DATA_STORE_ID"]
+EARNINGS_DATA_STORE_ID = os.environ.get("EARNINGS_DATA_STORE_ID", "")
+COMPETITOR_DATA_STORE_ID = os.environ.get("COMPETITOR_DATA_STORE_ID", "")
 
 # Batch extraction uses larger page size for comprehensive coverage
 BATCH_PAGE_SIZE = 10
@@ -121,8 +121,8 @@ def _search_data_store(query: str, data_store_id: str) -> str:
 
         return "\n\n---\n\n".join(results)
     except Exception as e:
-        logger.error(f"Failed to search data store {data_store_id}: {e}")
-        return f"Error searching documents: {e}"
+        logger.error("Failed to search data store %s: %s", data_store_id, e)
+        return "Error searching documents. Check server logs for details."
 
 
 def search_historical_documents(query: str) -> str:

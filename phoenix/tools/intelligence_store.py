@@ -13,8 +13,8 @@ from google.cloud import storage
 
 logger = logging.getLogger(__name__)
 
-INTELLIGENCE_BUCKET = os.environ["INTELLIGENCE_BUCKET"]
-PROJECT_ID = os.environ["GOOGLE_CLOUD_PROJECT"]
+INTELLIGENCE_BUCKET = os.environ.get("INTELLIGENCE_BUCKET", "")
+PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 
 # Paths within the bucket
 INTELLIGENCE_REPORT_PATH = "reports/intelligence_report.md"
@@ -56,8 +56,8 @@ def _read_report(blob_path: str, report_label: str, metadata_key: str) -> str:
 
         return content
     except Exception as e:
-        logger.error(f"Failed to read {report_label} from GCS: {e}")
-        return f"Error reading {report_label}: {e}"
+        logger.error("Failed to read %s from GCS: %s", report_label, e)
+        return f"Error reading {report_label}. Check server logs for details."
 
 
 def read_intelligence_report() -> str:
