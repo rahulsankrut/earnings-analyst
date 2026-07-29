@@ -54,11 +54,14 @@ def _ensure_report_saved(report_type: str, state_key: str):
                             is otherwise lost entirely. Persist it.
     """
 
-    def _callback(ctx):
-        if ctx.state.get(report_saved_flag(report_type)):
+    # ADK invokes after_agent_callback with the keyword `callback_context`,
+    # so the parameter name is part of the contract — not just documentation.
+    def _callback(callback_context):
+        state = callback_context.state
+        if state.get(report_saved_flag(report_type)):
             return None
 
-        content = str(ctx.state.get(state_key, "") or "").strip()
+        content = str(state.get(state_key, "") or "").strip()
         if len(content) < _MIN_REPORT_CHARS:
             logger.error(
                 "%s stage finished without saving, and state[%r] holds only %d "

@@ -30,14 +30,37 @@ CONFIRMATION = "I have completed all processing. The report has been saved to Cl
 
 
 def _run(state):
-    """Runs the callback, returning what it persisted (or None)."""
+    """Runs the callback, returning what it persisted (or None).
+
+    Invoked with the `callback_context` KEYWORD, exactly as ADK does. Calling
+    it positionally hides a real defect: a callback whose parameter is named
+    anything else passes a positional test and then dies in production with
+    "unexpected keyword argument 'callback_context'". That is precisely what
+    happened before this was pinned.
+    """
     callback = _ensure_report_saved("intelligence", "intelligence_report")
     with patch(
         "intelligence_extractor.agent.persist_report",
         return_value="Successfully saved",
     ) as persist:
-        callback(_Ctx(state))
+        callback(callback_context=_Ctx(state))
     return persist.call_args[0] if persist.called else None
+
+
+def test_callback_accepts_adks_keyword_argument():
+    """ADK calls after_agent_callback(callback_context=...) by keyword.
+
+    Asserted on the signature directly so the requirement is visible, not
+    implied. A mismatch here does not surface until a live run — and only
+    after a full extraction stage has already burned through its searches.
+    """
+    import inspect
+
+    callback = _ensure_report_saved("intelligence", "intelligence_report")
+    params = inspect.signature(callback).parameters
+    assert "callback_context" in params, (
+        f"callback takes {list(params)}; ADK passes callback_context by keyword"
+    )
 
 
 def test_persists_report_when_model_skipped_the_tool():
@@ -92,6 +115,6 @@ def test_each_report_type_uses_its_own_flag_and_key():
             "intelligence_extractor.agent.persist_report",
             return_value="Successfully saved",
         ) as persist:
-            callback(_Ctx(state))
+            callback(callback_context=_Ctx(state))
         assert persist.called, f"{report_type} was suppressed by an unrelated flag"
         assert persist.call_args[0][1] == report_type
