@@ -1,3 +1,4 @@
+import glob
 import os
 from dotenv import load_dotenv
 
@@ -7,10 +8,34 @@ load_dotenv()
 import vertexai
 from vertexai import agent_engines
 from vertexai.preview.reasoning_engines import AdkApp
+from phoenix import PROFILE
 from phoenix.agent import phoenix_agent
 from intelligence_extractor.agent import root_agent as intelligence_extractor_agent
 
-AGENT_WHL_FILE = "dist/earnings_analyst-0.1-py3-none-any.whl"
+
+def _find_agent_wheel() -> str:
+    """Locates the built agent wheel in dist/.
+
+    The wheel filename embeds the package version, so hardcoding it means
+    every version bump either breaks the deploy or, worse, silently ships a
+    stale wheel that is still sitting in dist/. Pick the newest build and
+    fail loudly when there is none.
+    """
+    wheels = sorted(
+        glob.glob("dist/earnings_analyst-*-py3-none-any.whl"),
+        key=os.path.getmtime,
+        reverse=True,
+    )
+    if not wheels:
+        raise FileNotFoundError(
+            "No agent wheel found in dist/. Run `poetry build` before deploying."
+        )
+    if len(wheels) > 1:
+        print(f"  ⚠️  Multiple wheels in dist/ — using newest: {wheels[0]}")
+    return wheels[0]
+
+
+AGENT_WHL_FILE = _find_agent_wheel()
 
 REQUIREMENTS = [
     f"./{AGENT_WHL_FILE}",
@@ -33,6 +58,8 @@ RUNTIME_ENV_VARS = [
     "INTELLIGENCE_BUCKET",
     "PHOENIX_MODEL",
     "PHOENIX_FLASH_MODEL",
+    # Without this the deployed agent falls back to the example profile.
+    "COMPANY_PROFILE",
 ]
 
 # These must also be in .env for local deployment to work, but are NOT
@@ -68,7 +95,7 @@ def _add_label(resource_name: str, location: str) -> None:
         )
         engine = client.get_reasoning_engine(name=resource_name)
         labels = dict(engine.labels) if engine.labels else {}
-        labels["customer"] = "trane"
+        labels["customer"] = PROFILE.customer_label
         engine.labels = labels
         lro = client.update_reasoning_engine(
             aiplatform_v1.UpdateReasoningEngineRequest(
@@ -77,7 +104,7 @@ def _add_label(resource_name: str, location: str) -> None:
             )
         )
         lro.result()
-        print("  ✅ Label 'customer: trane' added")
+        print(f"  ✅ Label 'customer: {PROFILE.customer_label}' added")
     except Exception as e:
         print(f"  ⚠️  Failed to add label: {e}")
 

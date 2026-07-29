@@ -1,0 +1,25 @@
+{
+  "_comment": "Template profile. Copy to <yourcompany>.json, fill in, then set COMPANY_PROFILE=<yourcompany>. Fields: company_name, sector and competitors are required; customer_label defaults to a slug of company_name; sector_themes and segments are optional but strongly recommended — they become targeted searches and are the main driver of extraction quality.",
+
+  "company_name": "Example Corp",
+  "sector": "the company's industry, e.g. 'commercial HVAC and building technology'",
+  "customer_label": "example-corp",
+
+  "_sector_themes_note": "Industry-wide topics analysts probe across every call in this sector. Searched once, shared across all competitors.",
+  "sector_themes": [
+    "pricing and tariff impact",
+    "supply chain and input cost inflation",
+    "end-market demand"
+  ],
+
+  "_competitors_note": "Each competitor's 'segments' should be their own reporting-segment names as they appear in filings — these cannot be guessed from the company name, and supplying them accurately is what makes the deep-dive searches work.",
+  "competitors": [
+    {
+      "name": "Example Competitor",
+      "segments": [
+        "their first reporting segment",
+        "their second reporting segment"
+      ]
+    }
+  ]
+}

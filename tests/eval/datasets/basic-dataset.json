@@ -18,7 +18,7 @@
       "eval_case_id": "competitor_benchmark",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "How do our margins compare to Carrier Global's most recent quarter?"}]
+        "parts": [{"text": "How do our cloud margins compare to Microsoft's most recent quarter?"}]
       }
     }
   ]

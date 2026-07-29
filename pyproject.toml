@@ -8,6 +8,14 @@ readme = "README.md"
 packages = [
   {include = "phoenix"},
   {include = "intelligence_extractor"},
+  {include = "company_profiles"},
+]
+# Keep local development artifacts out of the deployment wheel. The ADK session
+# database in particular was shipping as a 42 MB blob inside a 42.5 MB wheel.
+exclude = [
+  "**/.adk/**",
+  "**/__pycache__/**",
+  "**/*.pyc",
 ]
 
 [tool.poetry.dependencies]

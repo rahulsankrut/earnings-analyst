@@ -1,0 +1,35 @@
+{
+  "company_name": "Alphabet",
+  "sector": "cloud infrastructure, digital advertising, and AI",
+  "customer_label": "alphabet",
+  "sector_themes": [
+    "AI infrastructure capital expenditure",
+    "cloud revenue growth rate",
+    "data center capacity constraints",
+    "digital advertising demand",
+    "AI model monetization",
+    "remaining performance obligation backlog"
+  ],
+  "competitors": [
+    {
+      "name": "Microsoft",
+      "segments": [
+        "Intelligent Cloud segment",
+        "Productivity and Business Processes segment",
+        "More Personal Computing segment",
+        "Azure revenue growth",
+        "Microsoft AI capital expenditure"
+      ]
+    },
+    {
+      "name": "Amazon",
+      "segments": [
+        "AWS segment",
+        "North America segment",
+        "International segment",
+        "AWS operating margin",
+        "Amazon advertising revenue"
+      ]
+    }
+  ]
+}

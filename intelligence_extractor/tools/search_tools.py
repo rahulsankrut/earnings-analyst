@@ -144,7 +144,8 @@ def search_competitor_documents(query: str) -> str:
     """Searches the competitor earnings data store (batch mode).
 
     Returns up to 10 results per query for comprehensive extraction.
-    Currently contains Carrier Global transcripts and filings.
+    Contains transcripts and filings for the competitors configured in
+    the active company profile.
 
     Args:
         query: Natural language search query.

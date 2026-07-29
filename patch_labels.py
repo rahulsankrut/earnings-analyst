@@ -5,6 +5,8 @@ from google.api_core.client_options import ClientOptions
 from google.protobuf import field_mask_pb2
 from dotenv import load_dotenv
 
+from company_profiles import load_profile
+
 def patch():
     load_dotenv()
 
@@ -19,7 +21,9 @@ def patch():
 
     engine = client.get_reasoning_engine(name=resource_name)
     new_labels = dict(engine.labels) if engine.labels else {}
-    new_labels["customer"] = os.environ.get("CUSTOMER_LABEL", "trane")
+    new_labels["customer"] = os.environ.get(
+        "CUSTOMER_LABEL", load_profile().customer_label
+    )
     engine.labels = new_labels
 
     update_mask = field_mask_pb2.FieldMask(paths=["labels"])

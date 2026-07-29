@@ -133,13 +133,15 @@ def search_historical_documents(query: str) -> str:
 def search_competitor_documents(query: str) -> str:
     """Searches the competitor earnings data store.
 
-    Currently contains earnings call transcripts and filings for
-    Carrier Global only. Johnson Controls (JCI) data is not yet available.
+    Contains earnings call transcripts and filings for the competitors
+    configured in the active company profile. Scope the query by naming
+    the competitor you want.
 
     Args:
-        query: Natural language search query (e.g., "Carrier operating margin",
-               "What did analysts ask Carrier about pricing?",
-               "Carrier guidance for 2025").
+        query: Natural language search query naming a competitor (e.g.,
+               "<competitor> operating margin",
+               "What did analysts ask <competitor> about pricing?",
+               "<competitor> guidance for 2025").
 
     Returns:
         str: Relevant snippets from competitor documents, or an error message.

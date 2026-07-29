@@ -100,9 +100,10 @@ def read_analyst_report() -> str:
 def read_competitor_report() -> str:
     """Reads the pre-extracted competitor intelligence report from Cloud Storage.
 
-    Contains Carrier Global competitive dynamics, analyst questions asked
-    of competitors, competitive landmines, and sector themes — all
-    pre-computed from the competitor Vertex AI Search data store.
+    Contains competitive dynamics for every competitor in the active
+    company profile, analyst questions asked of them, competitive
+    landmines, and sector themes — all pre-computed from the competitor
+    Vertex AI Search data store.
 
     Returns:
         str: The full competitor report in markdown, or an error message

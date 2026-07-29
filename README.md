@@ -162,6 +162,10 @@ cp .env.example .env
 Edit `.env`:
 
 ```bash
+# ── Company Profile ───────────────────────────────────────────────────────
+# Which company the agents analyse (see "Company profiles" below)
+COMPANY_PROFILE=alphabet
+
 # ── Google Cloud Project ──────────────────────────────────────────────────
 GOOGLE_CLOUD_PROJECT=your-project-id
 GOOGLE_CLOUD_LOCATION=us-central1
@@ -227,16 +231,70 @@ Deployment takes 5-10 minutes per agent. When complete, you'll see:
 ```
 --- Deploying Phoenix (C-Suite Earnings Prep) ---
   ✅ Phoenix deployed: projects/.../reasoningEngines/123456789
-  ✅ Label 'customer: trane' added
+  ✅ Label 'customer: alphabet' added
 
 --- Deploying Intelligence Extractor (Batch Pipeline) ---
   ✅ Intelligence Extractor deployed: projects/.../reasoningEngines/987654321
-  ✅ Label 'customer: trane' added
+  ✅ Label 'customer: alphabet' added
 
 ✅ All agents deployed.
 ```
 
 Record the resource names — you'll need them to trigger the agents.
+
+## Company profiles
+
+The agents are company-agnostic. Which company they analyse — and which
+competitors they benchmark against — comes from a profile in
+`company_profiles/data/`, selected by `COMPANY_PROFILE` in `.env`.
+
+Shipped profiles: `alphabet` (Alphabet vs. Microsoft and Amazon), and
+`example` (a documented template).
+
+### Adding a company
+
+```bash
+cp company_profiles/data/example.json company_profiles/data/acme.json
+# edit acme.json, then:
+echo "COMPANY_PROFILE=acme" >> .env
+```
+
+A profile looks like this:
+
+```json
+{
+  "company_name": "Alphabet",
+  "sector": "cloud infrastructure, digital advertising, and AI",
+  "customer_label": "alphabet",
+  "sector_themes": ["AI infrastructure capital expenditure", "..."],
+  "competitors": [
+    {"name": "Microsoft", "segments": ["Intelligent Cloud segment", "..."]},
+    {"name": "Amazon",    "segments": ["AWS segment", "..."]}
+  ]
+}
+```
+
+`company_name`, `sector`, and `competitors` are required; `customer_label`
+defaults to a slug of the company name.
+
+**`segments` matters most.** Those are the competitor's own reporting-segment
+names as they appear in filings, and they cannot be inferred from a company
+name. They become targeted searches, so accurate segment names are the main
+driver of extraction quality. `sector_themes` are industry-wide topics,
+searched once and shared across all competitors.
+
+### What the profile drives
+
+- The competitor search plan — 22 queries per competitor plus one per segment,
+  plus one per sector theme. Adding a competitor increases extraction time;
+  the pipeline is rate-limited to one model call every 1.5s
+- Competitor names throughout the Phoenix and briefing prompts
+- The `customer` label applied to deployed agents
+
+Changing profiles does **not** change the data stores. Both agents read
+whatever is in `EARNINGS_DATA_STORE_ID` and `COMPETITOR_DATA_STORE_ID`, so a
+new company also needs its filings ingested (see Step 4). All competitors
+share the single competitor data store; searches are scoped by name.
 
 ## Deleting deployed agents
 

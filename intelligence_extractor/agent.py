@@ -18,10 +18,22 @@ Architecture:
 
 from google.adk.agents import Agent, SequentialAgent, LoopAgent
 
-from . import MODEL, FLASH_MODEL
+from . import MODEL, FLASH_MODEL, PROFILE
 from .tools.search_tools import search_historical_documents, search_competitor_documents
 from .tools.storage_tools import save_intelligence_report
 from .callbacks import rate_limit_callback
+from .competitor_prompt import build_competitor_prompt, competitor_search_count
+
+# Search budgets quoted back to the user by the orchestrator. The company and
+# analyst plans are fixed literals in their prompts below; the competitor plan
+# is generated, so its size depends on how many competitors and segments the
+# active profile declares.
+COMPANY_SEARCH_COUNT = 26
+ANALYST_SEARCH_COUNT = 35
+COMPETITOR_SEARCH_COUNT = competitor_search_count(PROFILE)
+TOTAL_SEARCH_COUNT = (
+    COMPANY_SEARCH_COUNT + ANALYST_SEARCH_COUNT + COMPETITOR_SEARCH_COUNT
+)
 
 # ---------------------------------------------------------------------------
 # Company intelligence extractor — deep, multi-pass extraction
@@ -267,7 +279,7 @@ For EVERY named analyst found, produce a comprehensive profile card. Rank by thr
 |-------|--------|
 | **Calls Attended** | List every call where they appeared (e.g., Q1 2024, Q2 2024, Q3 2024) |
 | **Tone & Style** | Aggressive/confrontational, detail-oriented, macro-focused, supportive/softball, data-driven, narrative-focused |
-| **Core Obsessions** | Their 3-5 recurring topics, ranked by frequency. Be VERY specific: "HVAC segment operating margins vs. peers" not just "margins", "FCF conversion rate vs. 90% target" not just "cash flow" |
+| **Core Obsessions** | Their 3-5 recurring topics, ranked by frequency. Be VERY specific: name the segment, e.g. "cloud segment operating margins vs. peers" not just "margins", "FCF conversion rate vs. 90% target" not just "cash flow" |
 | **Signature Phrasing** | Exact phrases they repeatedly use. Quote directly from transcripts |
 | **Question Structure** | Single-part vs. multi-part? Open with data or narrative? Build to a trap? |
 | **Escalation Pattern** | How do they react to vague/deflective answers? Do they accept, push back, or reference prior commitments? Note specific instances |
@@ -348,126 +360,15 @@ AnalystExtractionLoop = LoopAgent(
 )
 
 # ---------------------------------------------------------------------------
-# Competitor intelligence extractor — Carrier Global focused
+# Competitor intelligence extractor — search plan generated from the profile
 # ---------------------------------------------------------------------------
 
-COMPETITOR_EXTRACTOR_PROMPT = """You are the Competitor Intelligence Extractor — performing exhaustive extraction of Carrier Global competitive intelligence.
-
-You have a `search_competitor_documents` tool that queries the competitor data store (returns up to 10 results per query). Your job is to make MANY targeted searches.
-
-**MANDATORY SEARCH PLAN — Execute ALL of these searches in order:**
-
-### Pass 1: Broad Discovery
-1. "Carrier Global"
-2. "Carrier earnings"
-3. "Carrier results"
-
-### Pass 2: Analyst Dynamics
-4. "Carrier analyst questions"
-5. "Carrier Q&A transcript"
-6. "Carrier analyst follow-up"
-7. "Carrier management response"
-
-### Pass 3: Financial Metrics
-8. "Carrier operating margin"
-9. "Carrier revenue growth"
-10. "Carrier EBITDA"
-11. "Carrier free cash flow"
-12. "Carrier earnings per share"
-13. "Carrier segment operating profit"
-
-### Pass 4: Forward-Looking
-14. "Carrier guidance outlook"
-15. "Carrier forecast targets"
-16. "Carrier long term framework"
-
-### Pass 5: Sector Themes
-17. "HVAC demand residential commercial"
-18. "data center cooling"
-19. "pricing tariff impact"
-20. "supply chain inflation"
-21. "commercial building"
-22. "heat pump electrification"
-
-### Pass 6: Strategic Moves
-23. "Carrier acquisition divestiture"
-24. "Carrier capital allocation buyback dividend"
-25. "Carrier restructuring cost savings"
-26. "Carrier market share competitive position"
-27. "Carrier backlog orders"
-28. "Carrier organic growth"
-
-### Pass 7: Segment Deep Dives
-29. "CSA Americas segment"
-30. "CSE Europe segment"
-31. "CSAME Asia Middle East segment"
-32. "CST segment technology"
-33. "residential light commercial RLC"
-
-Execute ALL 33 searches. Do NOT skip any.
-
-After completing all searches, if critical sections are empty, run additional targeted searches. When done:
-1. Call `save_intelligence_report` with `report_type="competitor"` and the FULL report as `report`.
-2. Then escalate to signal completion.
-
-Do NOT fabricate data. If a search returns no results, state: "No data found for this query." Only include information from the search tool.
-
-Synthesize ALL results into:
-
----
-
-# COMPETITOR INTELLIGENCE REPORT: CARRIER GLOBAL
-
-## SECTION 1: What Analysts Are Asking Carrier
-
-For each question found:
-- The specific question (quote or closely paraphrase)
-- How management responded — what landed well vs. drew follow-ups
-- Which questions could spill over to our call ("Carrier guided down on X — are you seeing the same?")
-
-## SECTION 2: Carrier Financial Snapshot
-
-Key metrics for comparison:
-- Revenue by quarter and segment
-- Operating margins by segment
-- Guidance and whether they beat/missed
-- Cash flow and capital allocation
-- Any notable one-time items
-
-## SECTION 3: Competitive Landmines
-
-Situations where Carrier's results create questions for us:
-- **What they disclosed**: specific data or commentary
-- **The question it triggers for us**: framed as an analyst would ask
-- **Recommended response**: acknowledge, pivot to differentiation
-
-## SECTION 4: Sector Themes Floating Across Calls
-
-Themes analysts probe in HVAC/building technology:
-- Theme name and evidence from Carrier transcripts
-- How Carrier handled it
-- Threat level (CRITICAL / HIGH / MEDIUM) for our call
-- Recommended framing for our management
-
-## SECTION 5: Competitive Question Bank (10-15 Questions)
-
-**GROUP A — "Are you seeing the same?" (5-8 questions)**
-Triggered by competitor headwinds or tailwinds.
-
-**GROUP B — "Why not you?" (5-7 questions)**
-Triggered by competitor outperformance or strategic moves.
-
-For each: cite Carrier context with specific numbers, rate threat level, suggest management response.
-
----
-
-Deliver the FULL report. Do NOT truncate. Be specific — cite Carrier's numbers when found.
-"""
+COMPETITOR_EXTRACTOR_PROMPT = build_competitor_prompt(PROFILE)
 
 CompetitorIntelligenceExtractor = Agent(
     name="competitor_intelligence_extractor",
     model=FLASH_MODEL,
-    description="Deep extraction of Carrier Global competitive intelligence.",
+    description=f"Deep extraction of {PROFILE.competitor_list} competitive intelligence.",
     instruction=COMPETITOR_EXTRACTOR_PROMPT,
     tools=[search_competitor_documents, save_intelligence_report],
     output_key="competitor_report",
@@ -481,7 +382,7 @@ CompetitorExtractionLoop = LoopAgent(
     max_iterations=2,
     description=(
         "Runs the competitor intelligence extractor in a loop. "
-        "First pass: full 33-search extraction. "
+        f"First pass: full {COMPETITOR_SEARCH_COUNT}-search extraction. "
         "Second pass: fill gaps and deepen key findings."
     ),
 )
@@ -503,23 +404,23 @@ ExtractionPipeline = IntelligenceGathering
 # Root orchestrator
 # ---------------------------------------------------------------------------
 
-ORCHESTRATOR_PROMPT = """You are the Intelligence Extraction Orchestrator. You manage the batch pipeline that extracts intelligence from Vertex AI Search data stores and saves it to Cloud Storage for the Phoenix earnings prep agent.
+ORCHESTRATOR_PROMPT = f"""You are the Intelligence Extraction Orchestrator. You manage the batch pipeline that extracts intelligence from Vertex AI Search data stores and saves it to Cloud Storage for the Phoenix earnings prep agent.
 
 ## Your Pipeline
 
 You have one sub-agent: `intelligence_gathering` (SequentialAgent).
 
 It runs three extraction loops in sequence:
-- **company_extraction_loop** (2 iterations): 26 searches for financial data. Saves to GCS as "intelligence" on completion.
-- **analyst_extraction_loop** (2 iterations): 35 searches for analyst behavior. Saves to GCS as "analyst" on completion.
-- **competitor_extraction_loop** (2 iterations): 33 searches for Carrier Global. Saves to GCS as "competitor" on completion.
+- **company_extraction_loop** (2 iterations): {COMPANY_SEARCH_COUNT} searches for financial data. Saves to GCS as "intelligence" on completion.
+- **analyst_extraction_loop** (2 iterations): {ANALYST_SEARCH_COUNT} searches for analyst behavior. Saves to GCS as "analyst" on completion.
+- **competitor_extraction_loop** (2 iterations): {COMPETITOR_SEARCH_COUNT} searches for {PROFILE.competitor_list}. Saves to GCS as "competitor" on completion.
 
 Each extractor saves its own report to GCS immediately when done — you do NOT need to call any save tool yourself.
 
 ## Instructions
 
 Your ONLY job is:
-1. Tell the user: "Starting intelligence extraction pipeline. Running 94 searches across data stores (company financials: 26, analyst profiles: 35, competitor intelligence: 33) with 2 passes each. Each report uploads to GCS as soon as it's ready..."
+1. Tell the user: "Starting intelligence extraction pipeline. Running {TOTAL_SEARCH_COUNT} searches across data stores (company financials: {COMPANY_SEARCH_COUNT}, analyst profiles: {ANALYST_SEARCH_COUNT}, competitor intelligence: {COMPETITOR_SEARCH_COUNT}) with 2 passes each. Each report uploads to GCS as soon as it's ready..."
 2. Transfer to `intelligence_gathering` to run the pipeline.
 3. After it completes, summarize:
    - Analyst profiles extracted
@@ -537,7 +438,7 @@ root_agent = Agent(
     description=(
         "Batch agent that performs deep extraction of company financials, "
         "analyst profiles, and competitor intelligence from Vertex AI Search "
-        "data stores, running 94 searches with iterative gap-filling, "
+        f"data stores, running {TOTAL_SEARCH_COUNT} searches with iterative gap-filling, "
         "and saves 3 reports to Cloud Storage."
     ),
     instruction=ORCHESTRATOR_PROMPT,

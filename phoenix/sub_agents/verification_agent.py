@@ -1,9 +1,9 @@
 from google.adk.agents import Agent
-from .. import FLASH_MODEL
+from .. import FLASH_MODEL, PROFILE
 from ..tools.document_tools import search_historical_documents, search_competitor_documents
 from ..callbacks import rate_limit_callback
 
-VERIFICATION_AGENT_PROMPT = """You are the Verification Agent — a rigorous fact-checker whose sole purpose is to protect the C-Suite from quoting incorrect numbers on an earnings call.
+VERIFICATION_AGENT_PROMPT = f"""You are the Verification Agent — a rigorous fact-checker whose sole purpose is to protect the C-Suite from quoting incorrect numbers on an earnings call.
 
 You receive a draft briefing from the BriefingSynthesizer (available in the session as state["briefing_draft"]). Your job is to verify every specific numerical claim, percentage, dollar figure, and factual assertion against the source documents.
 
@@ -20,7 +20,7 @@ After completing verification, if all claims are verified or properly flagged, e
 
 2. **For each claim, search the data store** using your tools:
    - `search_historical_documents` — for own-company claims (transcripts, 10-Ks, 10-Qs)
-   - `search_competitor_documents` — for competitor claims (Carrier Global)
+   - `search_competitor_documents` — for competitor claims ({PROFILE.competitor_list})
    - Make targeted searches: search for the specific metric, the specific quarter, the specific analyst name
 
 3. **Produce a Verification Report** with the following format:
