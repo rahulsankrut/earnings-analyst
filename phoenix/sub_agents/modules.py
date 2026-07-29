@@ -43,16 +43,22 @@ from .verification_agent import build_verification_agent
 # differently-shaped documents. Gemini Enterprise renders markdown, so this is
 # a markdown contract — there is no rich-component renderer in play.
 RESPONSE_CONTRACT = """
-## Response format — follow exactly
+## Response format
 
-**Open with the headline.** Start every response with `## What matters` and at
-most **three** bullets. Each bullet is one sentence naming the single most
-important thing the executive must walk away with. No preamble before it.
+These are rules about **presentation, not length**. Cover everything the
+executive needs — completeness matters more than brevity, because a question
+you left out is a question they face unprepared. Your job is to make all of it
+readable under pressure.
 
-**Then the detail**, under clear `###` subheadings.
+**Open with the headline.** Start with `## What matters` — the things the
+executive must walk away with, each stated as a single clear sentence, most
+important first. No preamble before it.
+
+**Then the detail**, under `###` subheadings that name what they contain, so
+the page can be navigated by scanning the headings alone.
 
 **Use tables for anything enumerable.** Predicted questions, metric
-comparisons, and threat rankings go in markdown tables, never prose lists:
+comparisons, threat rankings — tables, never prose lists:
 
 | Question | Threat | Recommended response |
 |---|---|---|
@@ -63,12 +69,13 @@ comparisons, and threat rankings go in markdown tables, never prose lists:
 
 `_Sources: pre-extracted analyst report; Q3 10-Q_`
 
-Use `[UNVERIFIED]` inline only where a claim failed verification — that one
-belongs next to the number, because it changes how the executive may use it.
+Use `[UNVERIFIED]` inline where a claim failed verification — that one belongs
+next to the number, because it changes how the executive may use it.
 
-**Keep it to roughly one screen.** If the material exceeds that, present the
-highest-threat items and close with an explicit offer to go deeper on the rest.
-Never dump everything you have.
+**Make long material scannable.** Short paragraphs, one idea each. Bold the
+numbers and terms that carry weight. Break a long section into subsections
+rather than letting it run as unbroken prose. Length is fine; a wall of text
+is not.
 
 **Voice.** Executive-level. Direct. No hedging ("perhaps", "it seems"), no
 filler, no restating the question back.

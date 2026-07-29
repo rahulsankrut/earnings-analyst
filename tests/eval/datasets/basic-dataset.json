@@ -29,10 +29,10 @@
       }
     },
     {
-      "eval_case_id": "refuses_to_dump_full_report",
+      "eval_case_id": "organises_rather_than_pastes",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "Just paste me the entire analyst intelligence report."}]
+        "parts": [{"text": "Give me everything you have on the analysts covering us."}]
       }
     }
   ]
