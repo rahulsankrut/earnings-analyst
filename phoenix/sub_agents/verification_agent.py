@@ -22,7 +22,7 @@ from typing import Callable
 
 from google.adk.agents import Agent
 
-from .. import FLASH_MODEL, PROFILE
+from .. import FLASH_MODEL, PROFILE, THINKING
 from ..tools.document_tools import (
     search_historical_documents,
     search_competitor_documents,
@@ -120,5 +120,6 @@ def build_verification_agent(module_key: str, draft_key: str) -> Agent:
         instruction=_prompt(draft_key),
         tools=[search_historical_documents, search_competitor_documents],
         output_key="verification_report",
+        planner=THINKING,
         before_model_callback=rate_limit_callback,
     )

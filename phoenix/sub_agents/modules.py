@@ -22,7 +22,7 @@ from typing import Callable
 
 from google.adk.agents import Agent, LoopAgent, SequentialAgent
 
-from .. import FLASH_MODEL
+from .. import FLASH_MODEL, THINKING
 from ..callbacks import rate_limit_callback
 from ..tools.document_tools import (
     search_historical_documents,
@@ -295,6 +295,7 @@ def _build_module_agent(module: CoachingModule):
         instruction=_synthesizer_prompt(module),
         tools=list(module.tools),
         output_key=module.state_key,
+        planner=THINKING,
         before_model_callback=rate_limit_callback,
     )
 
@@ -315,6 +316,7 @@ def _build_module_agent(module: CoachingModule):
         description=f"Applies verification findings to the {module.title} section.",
         instruction=_reviser_instruction(module),
         output_key=module.state_key,
+        planner=THINKING,
         before_model_callback=rate_limit_callback,
     )
 
@@ -351,9 +353,28 @@ def build_module_agents() -> list:
 
 
 def menu_markdown() -> str:
-    """The module menu, rendered once and embedded in Phoenix's prompt."""
+    """The module menu, rendered once and embedded in Phoenix's prompt.
+
+    Includes `recommend_when`, which is guidance for Phoenix's own routing
+    decisions and is not meant for the executive — use capabilities_markdown()
+    for anything user-facing.
+    """
     return "\n".join(
         f"{i}. **{m.title}** — {m.menu_summary}\n"
         f"   _Recommend when:_ {m.recommend_when}"
         for i, m in enumerate(MODULES, start=1)
     )
+
+
+def capabilities_markdown(prefix: str = "") -> str:
+    """What Phoenix can do, phrased for the executive.
+
+    Derived from the same registry as the routing menu so the two cannot drift
+    — an opening message that advertises a module which no longer exists is
+    worse than no opening message at all.
+
+    Args:
+        prefix: Prepended to each line. Pass "> " when embedding inside a
+            markdown blockquote, so the list does not break out of it.
+    """
+    return "\n".join(f"{prefix}- **{m.title}** — {m.menu_summary}" for m in MODULES)

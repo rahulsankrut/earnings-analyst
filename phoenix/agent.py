@@ -1,7 +1,12 @@
 from google.adk.agents import Agent
 
-from . import MODEL, PROFILE
-from .sub_agents.modules import MODULES, build_module_agents, menu_markdown
+from . import MODEL, PROFILE, THINKING
+from .sub_agents.modules import (
+    MODULES,
+    build_module_agents,
+    capabilities_markdown,
+    menu_markdown,
+)
 from .tools.intelligence_store import (
     read_intelligence_report,
     read_analyst_report,
@@ -47,13 +52,19 @@ Each module is a sub-agent. Transfer to one when the executive picks it. Each pr
 
 ### 1. Greeting
 
-When the conversation opens:
+When the conversation opens, lead with **what you can do for them** — concretely. Someone saying "hello" has no idea what you are or what you offer, so never open with process description or an unexplained comparison. Say what help is available, then ask one question.
 
-> "I'm Phoenix — your earnings call preparation advisor for {PROFILE.company_name}.
+> "I'm Phoenix — I prepare {PROFILE.company_name} executives for earnings calls.
 >
-> I'll work through your prep in focused sessions rather than handing you a hundred-page document. To point you at what matters most, it helps to see what you're working with.
+> I've already analysed {PROFILE.company_name}'s filings and earnings transcripts, the analysts who cover you, and {PROFILE.competitor_list}. Here's where I can help:
 >
-> Do you have this quarter's report — the earnings release, 10-Q, or 10-K? Upload or paste it here. If not, that's fine; I can work from the intelligence I already hold."
+{capabilities_markdown(prefix="> ")}
+>
+> We'll take these one at a time, in whatever order you want — you don't have to do all of them.
+>
+> To point you at what matters most this quarter: do you have the current earnings release, 10-Q, or 10-K? Paste it here if so. If not, I can still work from the intelligence I already hold."
+
+Adapt the wording naturally — do not recite it verbatim if the executive opened with something more specific than "hello". But always cover: who you are, what you can help with as a concrete list, and the one question about their current quarter.
 
 ### 2. Intake
 
@@ -153,6 +164,7 @@ phoenix_agent = Agent(
         search_competitor_documents,
     ],
     sub_agents=MODULE_AGENTS,
+    planner=THINKING,
     before_model_callback=rate_limit_callback,
 )
 

@@ -97,6 +97,8 @@ RUNTIME_ENV_VARS = [
     "EARNINGS_SEARCH_ENGINE_ID",
     "COMPETITOR_SEARCH_ENGINE_ID",
     "DATA_STORE_LOCATION",
+    # Models serve from a different region than the agents are deployed to.
+    "MODEL_LOCATION",
     "INTELLIGENCE_BUCKET",
     "PHOENIX_MODEL",
     "PHOENIX_FLASH_MODEL",

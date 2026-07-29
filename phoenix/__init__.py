@@ -2,6 +2,7 @@ import os
 from functools import cached_property
 
 from google.adk.models import Gemini
+from google.adk.planners import BuiltInPlanner
 from google.genai import types as genai_types
 from google.genai.types import HttpRetryOptions
 
@@ -23,6 +24,13 @@ _RETRY = HttpRetryOptions(
 # extractor generating a 40KB report legitimately takes minutes — this exists
 # to bound a stall, not to police normal latency.
 _REQUEST_TIMEOUT_MS = 600_000
+
+# Region that serves the MODELS, which is not the region the agents are
+# deployed to. gemini-3.5/3.6-flash serve only from the global endpoint: they
+# appear in us-central1's models.list() but a generate_content call there
+# returns 404 NOT_FOUND. GOOGLE_CLOUD_LOCATION stays us-central1 for Agent
+# Engine; only model traffic goes global.
+_MODEL_LOCATION = os.environ.get("MODEL_LOCATION", "global")
 
 
 class _TimeoutGemini(Gemini):
@@ -48,12 +56,15 @@ class _TimeoutGemini(Gemini):
             else None
         )
         return Client(
+            vertexai=True,
+            project=os.environ.get("GOOGLE_CLOUD_PROJECT") or None,
+            location=_MODEL_LOCATION,
             http_options=genai_types.HttpOptions(
                 headers=headers,
                 retry_options=self.retry_options,
                 base_url=self.base_url,
                 timeout=_REQUEST_TIMEOUT_MS,
-            )
+            ),
         )
 
 
@@ -61,9 +72,22 @@ def _model(name: str) -> Gemini:
     return _TimeoutGemini(model=name, retry_options=_RETRY)
 
 
+# Surfaces the model's reasoning as separate "thought" parts alongside the
+# answer, so a client can show how a conclusion was reached. Attached to every
+# agent via the `planner` field.
+#
+# This is worth having here specifically: the product's value rests on figures
+# being defensible, and the thought stream shows which sources a number was
+# drawn from and where the model hedged. Whether a given client renders thought
+# parts is up to that client — the agent emits them either way.
+THINKING = BuiltInPlanner(
+    thinking_config=genai_types.ThinkingConfig(include_thoughts=True)
+)
+
+
 # C-Suite Prep Agent Package — Let Agent Engine identify it
-MODEL = _model(os.environ.get("PHOENIX_MODEL", "gemini-2.5-pro"))
-FLASH_MODEL = _model(os.environ.get("PHOENIX_FLASH_MODEL", "gemini-2.5-flash"))
+MODEL = _model(os.environ.get("PHOENIX_MODEL", "gemini-3.6-flash"))
+FLASH_MODEL = _model(os.environ.get("PHOENIX_FLASH_MODEL", "gemini-3.6-flash"))
 
 # The company under analysis and its competitors. Selected by COMPANY_PROFILE.
 PROFILE = load_profile()

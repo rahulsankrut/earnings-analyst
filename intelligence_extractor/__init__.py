@@ -16,15 +16,18 @@ from company_profiles import load_profile
 # _TimeoutGemini: retries alone still left a run hung for 107 minutes at 0%
 # CPU, because ADK never sets an HTTP timeout and a stalled call is never
 # retried — it just stays open.
-from phoenix import _RETRY, _TimeoutGemini
+#
+# THINKING: the shared planner that makes model reasoning visible as separate
+# thought parts. Re-exported here so extractor agents attach the same one.
+from phoenix import _RETRY, THINKING, _TimeoutGemini
 
 
 def _model(name: str) -> Gemini:
     return _TimeoutGemini(model=name, retry_options=_RETRY)
 
 
-MODEL = _model(os.environ.get("PHOENIX_MODEL", "gemini-2.5-pro"))
-FLASH_MODEL = _model(os.environ.get("PHOENIX_FLASH_MODEL", "gemini-2.5-flash"))
+MODEL = _model(os.environ.get("PHOENIX_MODEL", "gemini-3.6-flash"))
+FLASH_MODEL = _model(os.environ.get("PHOENIX_FLASH_MODEL", "gemini-3.6-flash"))
 
 # The company under analysis and its competitors. Selected by COMPANY_PROFILE.
 PROFILE = load_profile()

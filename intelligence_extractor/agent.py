@@ -20,7 +20,7 @@ import logging
 
 from google.adk.agents import Agent, SequentialAgent, LoopAgent
 
-from . import MODEL, FLASH_MODEL, PROFILE
+from . import MODEL, FLASH_MODEL, PROFILE, THINKING
 from .tools.search_tools import search_historical_documents, search_competitor_documents
 from .tools.storage_tools import save_intelligence_report
 from .callbacks import rate_limit_callback
@@ -227,7 +227,8 @@ CompanyIntelligenceExtractor = Agent(
     instruction=COMPANY_EXTRACTOR_PROMPT,
     tools=[search_historical_documents, save_intelligence_report],
     output_key="intelligence_report",
-    before_model_callback=rate_limit_callback,
+    planner=THINKING,
+        before_model_callback=rate_limit_callback,
 )
 
 # LoopAgent allows the extractor to iterate — first pass extracts,
@@ -402,7 +403,8 @@ AnalystProfilerExtractor = Agent(
     instruction=ANALYST_PROFILER_PROMPT,
     tools=[search_historical_documents, save_intelligence_report],
     output_key="analyst_report",
-    before_model_callback=rate_limit_callback,
+    planner=THINKING,
+        before_model_callback=rate_limit_callback,
 )
 
 # LoopAgent for iterative analyst profiling — first pass finds names,
@@ -432,7 +434,8 @@ CompetitorIntelligenceExtractor = Agent(
     instruction=COMPETITOR_EXTRACTOR_PROMPT,
     tools=[search_competitor_documents, save_intelligence_report],
     output_key="competitor_report",
-    before_model_callback=rate_limit_callback,
+    planner=THINKING,
+        before_model_callback=rate_limit_callback,
 )
 
 # LoopAgent for iterative competitor extraction
@@ -505,5 +508,6 @@ root_agent = Agent(
     instruction=ORCHESTRATOR_PROMPT,
     tools=[],
     sub_agents=[ExtractionPipeline],
-    before_model_callback=rate_limit_callback,
+    planner=THINKING,
+        before_model_callback=rate_limit_callback,
 )
