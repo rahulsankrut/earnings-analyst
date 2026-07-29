@@ -6,6 +6,12 @@ Phoenix is a Google ADK multi-agent system that prepares C-Suite executives for 
 
 2. **Phoenix** (interactive, live during prep) — reads the pre-extracted intelligence, analyzes the current quarter's financials that the executive uploads, generates a tiered question bank with defensible responses, and coaches the executive through interactive Q&A simulation.
 
+> **Setting this up on a new machine?** See **[SETUP.md](SETUP.md)** — full
+> replication guide covering local tooling, the GCP resources (data stores,
+> Enterprise search engines, buckets), extraction, deployment, and Gemini
+> Enterprise registration, plus the failure modes that are easy to hit and
+> hard to diagnose.
+
 ---
 
 ## Architecture
