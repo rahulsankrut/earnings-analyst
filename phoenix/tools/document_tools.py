@@ -60,6 +60,72 @@ def _content_spec(extractive: bool):
     )
 
 
+# Result size caps. Extractive answers and segments are far richer than the
+# snippets this module used to get, and the extractors issue dozens of searches
+# per run — uncapped, a single 60-search plan exceeded the model's context and
+# the run stopped partway through with no report. Cap per document and per
+# search so a large search plan stays affordable.
+MAX_CHARS_PER_DOC = 1200
+MAX_CHARS_PER_SEARCH = 6000
+
+
+def _clean(text: str) -> str:
+    """Strips the HTML the snippet API embeds (<b> tags, &#39; entities)."""
+    import html
+    import re
+
+    return html.unescape(re.sub(r"<[^>]+>", "", str(text))).strip()
+
+
+def _document_text(derived_data, doc) -> str:
+    """Best available text for one document, bounded in size.
+
+    Sources are tried in order of information density rather than concatenated:
+    the same passage is usually present as an extractive answer, an extractive
+    segment AND a snippet, so appending all three tripled the payload for no
+    extra information.
+    """
+    def _collect(entries, key):
+        out = []
+        for entry in entries or []:
+            item = dict(entry)
+            text = _clean(item.get(key, ""))
+            if not text:
+                continue
+            page = item.get("pageNumber", "")
+            out.append(f"[Page {page}] {text}" if page else text)
+        return out
+
+    parts = []
+    if derived_data:
+        # Extractive answers carry page numbers and are the densest form.
+        parts = _collect(derived_data.get("extractive_answers"), "content")
+        if not parts:
+            parts = _collect(derived_data.get("extractive_segments"), "content")
+        if not parts:
+            parts = _collect(derived_data.get("snippets"), "snippet")
+        if not parts:
+            parts = _collect(derived_data.get("chunks"), "content")
+        if not parts:
+            for key in ("content", "text", "snippet", "htmlSnippet"):
+                value = derived_data.get(key, "")
+                if value and isinstance(value, str):
+                    parts = [_clean(value)]
+                    break
+
+    if not parts and getattr(doc, "struct_data", None):
+        for key in ("content", "text", "snippet", "body"):
+            value = doc.struct_data.get(key, "")
+            if value and isinstance(value, str):
+                parts = [_clean(value)]
+                break
+
+    text = "\n".join(parts)
+    if len(text) > MAX_CHARS_PER_DOC:
+        text = text[:MAX_CHARS_PER_DOC].rsplit(" ", 1)[0] + " …[truncated]"
+    return text
+
+
 def _search_data_store(query: str, data_store_id: str) -> str:
     """Internal helper to query a Vertex AI Search data store."""
     try:
@@ -93,68 +159,18 @@ def _search_data_store(query: str, data_store_id: str) -> str:
             doc = result.document
             derived_data = doc.derived_struct_data
 
-            doc_snippets = []
             doc_title = ""
-
             if derived_data:
-                # Extract document title/link for citation
                 doc_title = (
                     derived_data.get("title", "")
                     or derived_data.get("link", "")
                     or ""
                 )
 
-                # Method 1: snippets array
-                for s in derived_data.get("snippets", []):
-                    text = s.get("snippet", "") or s.get("htmlSnippet", "")
-                    if text:
-                        page = s.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-                # Method 2: extractive answers
-                for ea in derived_data.get("extractive_answers", []):
-                    text = ea.get("content", "")
-                    if text:
-                        page = ea.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-                # Method 3: extractive segments
-                for seg in derived_data.get("extractive_segments", []):
-                    text = seg.get("content", "")
-                    if text:
-                        page = seg.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-                # Method 4: direct content fields in derived_struct_data
-                if not doc_snippets:
-                    for key in ("content", "text", "snippet", "htmlSnippet"):
-                        text = derived_data.get(key, "")
-                        if text and isinstance(text, str):
-                            doc_snippets.append(text)
-                            break
-
-                # Method 5: chunked document content
-                for chunk in derived_data.get("chunks", []):
-                    text = chunk.get("content", "") or chunk.get("snippet", "")
-                    if text:
-                        page = chunk.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-            # Method 6: struct_data (non-derived document metadata)
-            if not doc_snippets and doc.struct_data:
-                for key in ("content", "text", "snippet", "body"):
-                    text = doc.struct_data.get(key, "")
-                    if text and isinstance(text, str):
-                        doc_snippets.append(text)
-                        break
-
-            if doc_snippets:
+            doc_text = _document_text(derived_data, doc)
+            if doc_text:
                 header = f"[Document: {doc_title or doc.name}]"
-                results.append(f"{header}\n" + "\n".join(doc_snippets))
+                results.append(f"{header}\n{doc_text}")
             else:
                 # Last resort: log all available keys so we can fix parsing
                 avail_keys = list(derived_data.keys()) if derived_data else []
@@ -168,7 +184,13 @@ def _search_data_store(query: str, data_store_id: str) -> str:
         if not results:
             return "No relevant information found in the data store for this query."
 
-        return "\n\n---\n\n".join(results)
+        joined = "\n\n---\n\n".join(results)
+        if len(joined) > MAX_CHARS_PER_SEARCH:
+            joined = (
+                joined[:MAX_CHARS_PER_SEARCH].rsplit("\n\n---\n\n", 1)[0]
+                + "\n\n---\n\n[Additional results omitted — narrow the query to see more.]"
+            )
+        return joined
     except Exception as e:
         logger.error("Failed to search data store %s: %s", data_store_id, e)
         return "Error searching documents. Check server logs for details."

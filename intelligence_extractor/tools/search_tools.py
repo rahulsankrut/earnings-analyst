@@ -12,7 +12,12 @@ from google.cloud import discoveryengine_v1 as discoveryengine
 
 # Serving-config and content-spec construction are shared with the Phoenix
 # search tools; only the page size differs between batch and live search.
-from phoenix.tools.document_tools import _content_spec, _serving_config
+from phoenix.tools.document_tools import (
+    MAX_CHARS_PER_SEARCH,
+    _content_spec,
+    _document_text,
+    _serving_config,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -59,9 +64,7 @@ def _search_data_store(query: str, data_store_id: str) -> str:
             doc = result.document
             derived_data = doc.derived_struct_data
 
-            doc_snippets = []
             doc_title = ""
-
             if derived_data:
                 doc_title = (
                     derived_data.get("title", "")
@@ -69,57 +72,10 @@ def _search_data_store(query: str, data_store_id: str) -> str:
                     or ""
                 )
 
-                # Method 1: snippets array
-                for s in derived_data.get("snippets", []):
-                    text = s.get("snippet", "") or s.get("htmlSnippet", "")
-                    if text:
-                        page = s.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-                # Method 2: extractive answers
-                for ea in derived_data.get("extractive_answers", []):
-                    text = ea.get("content", "")
-                    if text:
-                        page = ea.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-                # Method 3: extractive segments
-                for seg in derived_data.get("extractive_segments", []):
-                    text = seg.get("content", "")
-                    if text:
-                        page = seg.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-                # Method 4: direct content fields
-                if not doc_snippets:
-                    for key in ("content", "text", "snippet", "htmlSnippet"):
-                        text = derived_data.get(key, "")
-                        if text and isinstance(text, str):
-                            doc_snippets.append(text)
-                            break
-
-                # Method 5: chunked content
-                for chunk in derived_data.get("chunks", []):
-                    text = chunk.get("content", "") or chunk.get("snippet", "")
-                    if text:
-                        page = chunk.get("pageNumber", "")
-                        prefix = f"[Page {page}] " if page else ""
-                        doc_snippets.append(f"{prefix}{text}")
-
-            # Method 6: struct_data
-            if not doc_snippets and doc.struct_data:
-                for key in ("content", "text", "snippet", "body"):
-                    text = doc.struct_data.get(key, "")
-                    if text and isinstance(text, str):
-                        doc_snippets.append(text)
-                        break
-
-            if doc_snippets:
+            doc_text = _document_text(derived_data, doc)
+            if doc_text:
                 header = f"[Document: {doc_title or doc.name}]"
-                results.append(f"{header}\n" + "\n".join(doc_snippets))
+                results.append(f"{header}\n{doc_text}")
             else:
                 avail_keys = list(derived_data.keys()) if derived_data else []
                 struct_keys = list(doc.struct_data.keys()) if doc.struct_data else []
@@ -132,7 +88,13 @@ def _search_data_store(query: str, data_store_id: str) -> str:
         if not results:
             return "No relevant information found in the data store for this query."
 
-        return "\n\n---\n\n".join(results)
+        joined = "\n\n---\n\n".join(results)
+        if len(joined) > MAX_CHARS_PER_SEARCH:
+            joined = (
+                joined[:MAX_CHARS_PER_SEARCH].rsplit("\n\n---\n\n", 1)[0]
+                + "\n\n---\n\n[Additional results omitted — narrow the query to see more.]"
+            )
+        return joined
     except Exception as e:
         logger.error("Failed to search data store %s: %s", data_store_id, e)
         return "Error searching documents. Check server logs for details."
