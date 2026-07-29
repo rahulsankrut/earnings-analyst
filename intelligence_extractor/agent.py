@@ -16,6 +16,8 @@ Architecture:
             └── competitor_intelligence_extractor → saves to GCS on completion
 """
 
+import logging
+
 from google.adk.agents import Agent, SequentialAgent, LoopAgent
 
 from . import MODEL, FLASH_MODEL, PROFILE
@@ -23,6 +25,59 @@ from .tools.search_tools import search_historical_documents, search_competitor_d
 from .tools.storage_tools import save_intelligence_report
 from .callbacks import rate_limit_callback
 from .competitor_prompt import build_competitor_prompt, competitor_search_count
+from .tools.storage_tools import persist_report, report_saved_flag
+
+logger = logging.getLogger(__name__)
+
+
+# Shortest plausible report. A stage that emits less than this as its final
+# text has not produced a report — it has produced a status message — and the
+# safety net must not persist it over real content.
+_MIN_REPORT_CHARS = 2000
+
+
+def _ensure_report_saved(report_type: str, state_key: str):
+    """Persists a stage's report if the model finished without saving it.
+
+    Calling save_intelligence_report is model discretion, and discretion is
+    not reliable: observed live, the company stage produced a complete report
+    as its final text, escalated, and never called the tool. The pipeline
+    reported success while Phoenix kept serving a report from a previous run.
+
+    The two failure shapes need different handling, which is why this checks
+    both the flag and the content:
+
+      - Tool called      -> state[output_key] usually holds a short "saved it"
+                            confirmation, so persisting it would REPLACE the
+                            real report with that sentence. Do nothing.
+      - Tool NOT called  -> state[output_key] holds the full report text, which
+                            is otherwise lost entirely. Persist it.
+    """
+
+    def _callback(ctx):
+        if ctx.state.get(report_saved_flag(report_type)):
+            return None
+
+        content = str(ctx.state.get(state_key, "") or "").strip()
+        if len(content) < _MIN_REPORT_CHARS:
+            logger.error(
+                "%s stage finished without saving, and state[%r] holds only %d "
+                "chars — too short to be a report. This report is MISSING for "
+                "this run.",
+                report_type, state_key, len(content),
+            )
+            return None
+
+        logger.warning(
+            "%s stage finished without calling save_intelligence_report; "
+            "persisting %d chars from state[%r] instead.",
+            report_type, len(content), state_key,
+        )
+        result = persist_report(content, report_type)
+        logger.info("Safety-net save for %s: %s", report_type, result[:120])
+        return None
+
+    return _callback
 
 # Search budgets quoted back to the user by the orchestrator. The company and
 # analyst plans are fixed literals in their prompts below; the competitor plan
@@ -183,6 +238,7 @@ CompanyExtractionLoop = LoopAgent(
         "First pass: full 26-search extraction of financial data. "
         "Second pass: fill any gaps identified in first pass."
     ),
+    after_agent_callback=_ensure_report_saved("intelligence", "intelligence_report"),
 )
 
 # ---------------------------------------------------------------------------
@@ -357,6 +413,7 @@ AnalystExtractionLoop = LoopAgent(
         "First pass: 35 searches to identify all analysts and behaviors. "
         "Second pass: targeted per-analyst searches to deepen profiles."
     ),
+    after_agent_callback=_ensure_report_saved("analyst", "analyst_report"),
 )
 
 # ---------------------------------------------------------------------------
@@ -385,6 +442,7 @@ CompetitorExtractionLoop = LoopAgent(
         f"First pass: full {COMPETITOR_SEARCH_COUNT}-search extraction. "
         "Second pass: fill gaps and deepen key findings."
     ),
+    after_agent_callback=_ensure_report_saved("competitor", "competitor_report"),
 )
 
 # ---------------------------------------------------------------------------

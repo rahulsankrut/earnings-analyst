@@ -5,11 +5,25 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from google.adk.tools import ToolContext
 from google.cloud import storage
 
 logger = logging.getLogger(__name__)
 
 from company_profiles import load_profile
+
+# State flag recording that a report actually reached GCS during this run.
+# The extractors are instructed to call save_intelligence_report and then
+# escalate, but that is model discretion: observed live, one stage produced a
+# complete report as its final text and escalated without ever calling the
+# tool, so the pipeline reported success while serving a stale report. The
+# per-loop after_agent_callback in agent.py reads this flag to decide whether
+# it needs to persist the report itself.
+SAVED_FLAG = "_report_saved_"
+
+
+def report_saved_flag(report_type: str) -> str:
+    return f"{SAVED_FLAG}{report_type}"
 
 INTELLIGENCE_BUCKET = os.environ.get("INTELLIGENCE_BUCKET", "")
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
@@ -25,19 +39,11 @@ COMPETITOR_REPORT_PATH = f"{REPORT_PREFIX}/competitor_report.md"
 METADATA_PATH = f"{REPORT_PREFIX}/metadata.json"
 
 
-def save_intelligence_report(report: str, report_type: str) -> str:
-    """Saves an extracted intelligence report to Cloud Storage.
+def persist_report(report: str, report_type: str) -> str:
+    """Writes a report to GCS. Plain function — no ADK context required.
 
-    Call this after extraction is complete to persist the report
-    to the GCS staging bucket for Phoenix to read.
-
-    Args:
-        report: The full report content in markdown. Must be the
-                COMPLETE report — do not summarize or truncate.
-        report_type: Either "intelligence", "analyst", or "competitor".
-
-    Returns:
-        str: Success confirmation with timestamp, or error message.
+    Split out from the tool so the after_agent_callback safety net can call
+    it directly when the model finishes without invoking the tool.
     """
     try:
         valid_types = ("intelligence", "analyst", "competitor")
@@ -86,3 +92,28 @@ def save_intelligence_report(report: str, report_type: str) -> str:
     except Exception as e:
         logger.error("Failed to save %s report to GCS: %s", report_type, e)
         return f"Error saving {report_type} report. Check server logs for details."
+
+
+def save_intelligence_report(
+    report: str, report_type: str, tool_context: ToolContext
+) -> str:
+    """Saves an extracted intelligence report to Cloud Storage.
+
+    Call this after extraction is complete to persist the report
+    to the GCS staging bucket for Phoenix to read.
+
+    Args:
+        report: The full report content in markdown. Must be the
+                COMPLETE report — do not summarize or truncate.
+        report_type: Either "intelligence", "analyst", or "competitor".
+
+    Returns:
+        str: Success confirmation with timestamp, or error message.
+    """
+    result = persist_report(report, report_type)
+    # Record the save so the safety net does not overwrite a good report with
+    # whatever text the agent happened to emit last (often just a short
+    # "the report has been saved" confirmation).
+    if result.startswith("Successfully"):
+        tool_context.state[report_saved_flag(report_type)] = True
+    return result
