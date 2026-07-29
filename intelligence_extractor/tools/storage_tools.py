@@ -9,13 +9,20 @@ from google.cloud import storage
 
 logger = logging.getLogger(__name__)
 
+from company_profiles import load_profile
+
 INTELLIGENCE_BUCKET = os.environ.get("INTELLIGENCE_BUCKET", "")
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "")
 
-INTELLIGENCE_REPORT_PATH = "reports/intelligence_report.md"
-ANALYST_REPORT_PATH = "reports/analyst_report.md"
-COMPETITOR_REPORT_PATH = "reports/competitor_report.md"
-METADATA_PATH = "reports/metadata.json"
+# Reports are namespaced by profile. Without this, pointing a second company at
+# an existing INTELLIGENCE_BUCKET would silently overwrite — or serve — the
+# first company's intelligence.
+REPORT_PREFIX = f"reports/{load_profile().profile_name}"
+
+INTELLIGENCE_REPORT_PATH = f"{REPORT_PREFIX}/intelligence_report.md"
+ANALYST_REPORT_PATH = f"{REPORT_PREFIX}/analyst_report.md"
+COMPETITOR_REPORT_PATH = f"{REPORT_PREFIX}/competitor_report.md"
+METADATA_PATH = f"{REPORT_PREFIX}/metadata.json"
 
 
 def save_intelligence_report(report: str, report_type: str) -> str:
@@ -60,6 +67,10 @@ def save_intelligence_report(report: str, report_type: str) -> str:
 
         now = datetime.now(timezone.utc).isoformat()
         metadata[f"{report_type}_extracted_at"] = now
+        # Stamped so readers can detect a profile/bucket mismatch instead of
+        # silently serving another company's intelligence.
+        metadata["profile"] = load_profile().profile_name
+        metadata["company_name"] = load_profile().company_name
         meta_blob.upload_from_string(
             json.dumps(metadata, indent=2),
             content_type="application/json",

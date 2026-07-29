@@ -1,17 +1,24 @@
 {
   "eval_cases": [
     {
-      "eval_case_id": "capability_intro",
+      "eval_case_id": "greeting_offers_journey",
       "prompt": {
         "role": "user",
         "parts": [{"text": "Hello, what can you help me with?"}]
       }
     },
     {
-      "eval_case_id": "intelligence_load",
+      "eval_case_id": "recommends_a_starting_module",
       "prompt": {
         "role": "user",
-        "parts": [{"text": "Load the intelligence and tell me what you have."}]
+        "parts": [{"text": "I'm prepping for our Q3 call. We lowered full-year guidance this quarter. Where should I start?"}]
+      }
+    },
+    {
+      "eval_case_id": "user_overrides_recommendation",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Skip the guidance work — take me straight to competitor landmines."}]
       }
     },
     {
@@ -19,6 +26,13 @@
       "prompt": {
         "role": "user",
         "parts": [{"text": "How do our cloud margins compare to Microsoft's most recent quarter?"}]
+      }
+    },
+    {
+      "eval_case_id": "refuses_to_dump_full_report",
+      "prompt": {
+        "role": "user",
+        "parts": [{"text": "Just paste me the entire analyst intelligence report."}]
       }
     }
   ]

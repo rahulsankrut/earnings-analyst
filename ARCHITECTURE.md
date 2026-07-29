@@ -54,34 +54,42 @@ The `phoenix` package contains the interactive agent that the C-Suite executive 
 
 ### Architecture Topology
 ```text
-Phoenix (Root Orchestrator)
-└── BriefingPipeline (SequentialAgent)
-    ├── BriefingSynthesizer (LlmAgent with Structured Output)
-    └── VerificationLoop (LoopAgent, max_iterations=1)
-        └── VerificationAgent (LlmAgent)
+Phoenix (Root Orchestrator — recommends, routes, narrates)
+├── guidance_credibility_module ┐
+├── analyst_ambush_module       │ LoopAgent(max_iterations=3)
+├── competitor_landmines_module │   └── SequentialAgent
+├── financial_deep_dive_module  ┘         ├── <key>_synthesizer  → state["module_<key>"]
+│                                          └── <key>_verifier     → state["verification_report"]
+└── qa_drill_module (LlmAgent — interactive, unverified by design)
 ```
+
+Phoenix does not produce one monolithic briefing. It recommends a starting
+module from what it observes in the current quarter's report, then routes to
+whichever modules the executive chooses.
 
 ### Key ADK Primitives Used
 
-#### 1. `SequentialAgent` (Guaranteed Ordering)
-The `BriefingPipeline` uses a `SequentialAgent` to orchestrate the creation and auditing of the prep guide.
-*   **How it works**: It guarantees that the `BriefingSynthesizer` runs first to create the draft, and only *after* it completes does the `VerificationLoop` begin.
-*   **Benefit**: This is a deterministic flow. No LLM routing is needed to decide what to do next; step B *must* follow step A.
+#### 1. Modules as sub-agents (Scoped Context)
+Each coaching module is an ADK sub-agent holding **only the tools it needs** —
+the analyst module reads the analyst report and nothing else.
+*   **How it works**: ADK's built-in agent transfer does the routing; there is no hand-written dispatcher.
+*   **Benefit**: Context stays bounded as competitors are added. Previously a single synthesiser loaded all three uncapped reports at once.
 
-#### 2. `Structured Output` (Pydantic Enforcement)
-The `BriefingSynthesizer` uses the `output_schema` parameter in ADK, mapped to the `EarningsBriefing` Pydantic model (defined in `schemas.py`).
-*   **How it works**: It forces the model to output a strictly typed JSON object matching lists of specific lengths (e.g., exactly 5 Tier 1 questions) and validated Enums for threat levels.
-*   **Benefit**: This ensures the report is programmatically parseable and can be rendered beautifully in a front-end GUI (as carousels or cards) rather than dumping a wall of text.
+#### 2. `LoopAgent` + `SequentialAgent` (The Corrective Auditor)
+Each verified module loops synthesise → fact-check → revise, up to three passes.
+*   **How it works**: The `SequentialAgent` guarantees the synthesiser runs before the verifier. The verifier escalates — exiting the loop — **only** when no claim is left unresolved. Otherwise the loop runs again and the synthesiser rewrites against `state["verification_report"]`.
+*   **Benefit**: Verification findings are acted on. An earlier design ran verification once with `max_iterations=1` and nothing ever consumed its output, so a `DISCREPANCY` could still reach the executive. Claims that remain unconfirmable are carried through marked `[UNVERIFIED]`.
 
-#### 3. `VerificationAgent` (The Auditor Pattern)
-The final step in the pipeline is a fact-checker.
-*   **How it works**: It reads the draft briefing produced by the synthesizer, extracts every numerical claim, and independently re-queries the data stores to verify them.
-*   **Benefit**: It protects the executive from quoting hallucinated or approximated numbers on live calls.
+#### 3. Profile-namespaced reports (Multi-tenancy Safety)
+Reports live under `reports/{profile}/` and are stamped with the profile that produced them.
+*   **How it works**: `_provenance_banner` prepends the company, extraction date, and — when they disagree — a loud mismatch warning that Phoenix is instructed to surface immediately.
+*   **Benefit**: Pointing a second company at an existing bucket cannot silently serve the first company's intelligence.
 
 ---
 
 ## Summary of Data Flow
 
 1.  **Search**: Sub-agents use `search_historical_documents` and `search_competitor_documents` to query Vertex AI Search.
-2.  **Persist**: `save_intelligence_report` stores massive markdown files in GCS.
-3.  **Serve**: Main agent uses `read_intelligence_report` to instantly load the context at session start.
+2.  **Persist**: `save_intelligence_report` stores markdown reports in GCS under `reports/{profile}/`.
+3.  **Serve**: Phoenix reads the reports, recommends a starting module, and routes to it.
+4.  **Verify**: Each module fact-checks and revises its own section before it reaches the executive.

@@ -1,0 +1,270 @@
+"""Coaching modules — the units of the earnings-prep journey.
+
+Phoenix previously produced one monolithic briefing, which forced all three
+intelligence reports into context and handed the executive a wall of markdown.
+Each module here is instead a small, focused unit that reads only what it needs.
+Scoping tools per module is what bounds context — no new read tools required.
+
+Every synthesis module runs as:
+
+    LoopAgent(max_iterations=3)
+      └── SequentialAgent
+            ├── <module>_synthesizer   -> state["module_<key>"]
+            └── <module>_verifier      -> state["verification_report"]
+
+The verifier escalates only when nothing is unresolved, so the loop iterates and
+the synthesiser revises against the verification report. Output written to
+state["module_<key>"] is what the PDF export later compiles.
+"""
+
+from dataclasses import dataclass, field
+from typing import Callable
+
+from google.adk.agents import Agent, LoopAgent, SequentialAgent
+
+from .. import FLASH_MODEL
+from ..callbacks import rate_limit_callback
+from ..tools.document_tools import (
+    search_historical_documents,
+    search_competitor_documents,
+)
+from ..tools.intelligence_store import (
+    read_intelligence_report,
+    read_analyst_report,
+    read_competitor_report,
+)
+from .verification_agent import build_verification_agent
+
+# ---------------------------------------------------------------------------
+# Shared response contract
+# ---------------------------------------------------------------------------
+
+# Applied to every module so the journey reads as one product rather than five
+# differently-shaped documents. Gemini Enterprise renders markdown, so this is
+# a markdown contract — there is no rich-component renderer in play.
+RESPONSE_CONTRACT = """
+## Response format — follow exactly
+
+**Open with the headline.** Start every response with `## What matters` and at
+most **three** bullets. Each bullet is one sentence naming the single most
+important thing the executive must walk away with. No preamble before it.
+
+**Then the detail**, under clear `###` subheadings.
+
+**Use tables for anything enumerable.** Predicted questions, metric
+comparisons, and threat rankings go in markdown tables, never prose lists:
+
+| Question | Threat | Recommended response |
+|---|---|---|
+| ... | CRITICAL | ... |
+
+**Sources go in a footer, not in sentences.** Do not interrupt prose with
+`[SOURCE: ...]`. End each `###` section with one line:
+
+`_Sources: pre-extracted analyst report; Q3 10-Q_`
+
+Use `[UNVERIFIED]` inline only where a claim failed verification — that one
+belongs next to the number, because it changes how the executive may use it.
+
+**Keep it to roughly one screen.** If the material exceeds that, present the
+highest-threat items and close with an explicit offer to go deeper on the rest.
+Never dump everything you have.
+
+**Voice.** Executive-level. Direct. No hedging ("perhaps", "it seems"), no
+filler, no restating the question back.
+
+**Do not render a menu of next steps.** Phoenix handles navigation; end with
+your content.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Module definitions
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CoachingModule:
+    """One unit of the coaching journey."""
+
+    key: str
+    title: str
+    menu_summary: str  # one line, shown in the menu
+    recommend_when: str  # helps Phoenix decide what to recommend
+    focus: str  # module-specific synthesis instructions
+    tools: tuple = field(default_factory=tuple)
+    verified: bool = True  # False for interactive modules
+
+    @property
+    def agent_name(self) -> str:
+        return f"{self.key}_module"
+
+    @property
+    def state_key(self) -> str:
+        # Deliberately not "module:<key>" — ADK reserves the app:, user: and
+        # temp: state prefixes, so a colon-delimited key invites confusion.
+        return f"module_{self.key}"
+
+
+MODULES: tuple = (
+    CoachingModule(
+        key="guidance_credibility",
+        title="Guidance Credibility",
+        menu_summary="How your guidance track record will be scrutinised, and where you are exposed.",
+        recommend_when="The quarter revised, raised, lowered, or reaffirmed guidance, or missed a prior target.",
+        tools=(read_intelligence_report,),
+        focus="""Assess how credible this management team's forward guidance looks
+right now, from the outside.
+
+Cover: the guidance track record across available quarters (set vs. delivered);
+where the current quarter's guidance departs from the prior trend; the specific
+credibility attacks an analyst can mount from that record; and the strongest
+honest framing for each.""",
+    ),
+    CoachingModule(
+        key="analyst_ambush",
+        title="Analyst Ambush Prep",
+        menu_summary="Who will ask what, in what style, and how each one escalates.",
+        recommend_when="Always valuable. Strongest when the executive is unsure who will be on the call.",
+        tools=(read_analyst_report,),
+        focus="""Prepare the executive for the specific people on the call.
+
+Cover: the analysts most likely to speak, ranked by likely aggressiveness this
+quarter; each one's core obsessions and questioning style; the exact opening
+question each is likely to use; and how each escalates when unsatisfied. Include
+the follow-up, not just the first question — the follow-up is where executives
+get caught.""",
+    ),
+    CoachingModule(
+        key="competitor_landmines",
+        title="Competitor Landmines",
+        menu_summary="What competitors disclosed that creates questions for you.",
+        recommend_when="A competitor has already reported this quarter, or the executive asks about positioning.",
+        tools=(read_competitor_report,),
+        focus="""Surface the competitive setups that turn into questions.
+
+Cover, per competitor: what they disclosed that invites a comparison; the
+question it triggers, phrased as an analyst would actually ask it; and a
+recommended response that acknowledges the fact and pivots to differentiation.
+Always attribute a number to the competitor it came from.""",
+    ),
+    CoachingModule(
+        key="financial_deep_dive",
+        title="Financial Deep Dive",
+        menu_summary="The numbers behind the quarter and the trends analysts will probe.",
+        recommend_when="The executive wants command of the underlying metrics, or the quarter has an unusual line item.",
+        tools=(read_intelligence_report, search_historical_documents),
+        focus="""Build the executive's command of their own numbers.
+
+Cover: the metrics that moved most and why; multi-quarter trends an analyst
+could frame unfavourably; any one-time or non-recurring items and how to
+characterise them; and the derived ratios analysts compute themselves. Search
+the historical data store for anything the pre-extracted report does not
+cover.""",
+    ),
+    CoachingModule(
+        key="qa_drill",
+        title="Q&A Drill",
+        menu_summary="Interactive practice — I ask, you answer, I critique.",
+        recommend_when="Offer once at least one other module is complete, as the way to rehearse.",
+        tools=(search_historical_documents,),
+        verified=False,
+        focus="""Run an interactive drill. This is a conversation, not a document.
+
+Ask ONE question at a time, in the voice and style of a specific named analyst
+drawn from the completed modules in session state. Wait for the executive's
+answer. Then critique it: what landed, what a hostile analyst does with the
+weak part, and a stronger formulation. Then ask the follow-up that analyst would
+actually ask.
+
+Escalate difficulty as they improve. Never ask the next question before
+critiquing the previous answer. Keep each turn short — this is a drill, not a
+briefing.""",
+    ),
+)
+
+MODULES_BY_KEY = {m.key: m for m in MODULES}
+
+
+# ---------------------------------------------------------------------------
+# Agent construction
+# ---------------------------------------------------------------------------
+
+
+def _synthesizer_prompt(module: CoachingModule) -> str:
+    return f"""You are the {module.title} specialist within Phoenix, the C-Suite
+earnings prep advisor.
+
+{module.focus}
+
+## Working method
+
+Load your source material with the tools available to you. Ground every claim in
+what you read — this is the executive's real earnings call, and a fabricated
+number is worse than an omission. If the intelligence does not cover something,
+say so and flag it as an open item for the IR team rather than filling the gap.
+
+The executive may also have provided the current quarter's report in the
+conversation. Where it is present, contrast it against the historical
+intelligence — the delta is where the hard questions live.
+
+## Revision
+
+If `state["verification_report"]` exists, a fact-checker has already reviewed
+your previous draft. Rewrite it now, applying every "Action needed": correct the
+figures it corrected, remove what it says to remove, and mark as `[UNVERIFIED]`
+anything it could not confirm. Do not silently keep a disputed number.
+
+{RESPONSE_CONTRACT}
+"""
+
+
+def _build_module_agent(module: CoachingModule):
+    """Builds one module: a verified loop, or a plain interactive agent."""
+    synthesizer = Agent(
+        name=f"{module.key}_synthesizer",
+        model=FLASH_MODEL,
+        description=module.menu_summary,
+        instruction=_synthesizer_prompt(module),
+        tools=list(module.tools),
+        output_key=module.state_key,
+        before_model_callback=rate_limit_callback,
+    )
+
+    if not module.verified:
+        # Interactive modules are conversational; there is no static draft to
+        # fact-check, so they are not wrapped in the verification loop.
+        synthesizer.name = module.agent_name
+        return synthesizer
+
+    return LoopAgent(
+        name=module.agent_name,
+        max_iterations=3,
+        description=module.menu_summary,
+        sub_agents=[
+            SequentialAgent(
+                name=f"{module.key}_synthesis_pass",
+                sub_agents=[
+                    synthesizer,
+                    build_verification_agent(module.key, module.state_key),
+                ],
+                description=(
+                    f"Synthesises the {module.title} section, then fact-checks it."
+                ),
+            )
+        ],
+    )
+
+
+def build_module_agents() -> list:
+    """All coaching modules, as sub-agents for Phoenix to route between."""
+    return [_build_module_agent(m) for m in MODULES]
+
+
+def menu_markdown() -> str:
+    """The module menu, rendered once and embedded in Phoenix's prompt."""
+    return "\n".join(
+        f"{i}. **{m.title}** — {m.menu_summary}\n"
+        f"   _Recommend when:_ {m.recommend_when}"
+        for i, m in enumerate(MODULES, start=1)
+    )

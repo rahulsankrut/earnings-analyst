@@ -57,6 +57,9 @@ class CompanyProfile:
     customer_label: str
     sector_themes: tuple[str, ...]
     competitors: tuple[Competitor, ...]
+    # The profile's own key (the filename stem, e.g. "alphabet"). Used to
+    # namespace GCS report paths so two companies cannot collide in one bucket.
+    profile_name: str = "unnamed"
 
     @property
     def competitor_names(self) -> tuple[str, ...]:
@@ -73,7 +76,9 @@ class CompanyProfile:
         return f"{', '.join(names[:-1])} and {names[-1]}"
 
     @classmethod
-    def from_dict(cls, data: dict, *, source: str = "<profile>") -> "CompanyProfile":
+    def from_dict(
+        cls, data: dict, *, source: str = "<profile>", name: str = "unnamed"
+    ) -> "CompanyProfile":
         required = ("company_name", "sector", "competitors")
         missing = [key for key in required if not data.get(key)]
         if missing:
@@ -98,6 +103,7 @@ class CompanyProfile:
             competitors=tuple(
                 Competitor.from_dict(c, source=source) for c in competitors
             ),
+            profile_name=name,
         )
 
     @classmethod
@@ -106,4 +112,4 @@ class CompanyProfile:
             data = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
             raise ProfileError(f"{path.name}: invalid JSON — {exc}") from exc
-        return cls.from_dict(data, source=path.name)
+        return cls.from_dict(data, source=path.name, name=path.stem)

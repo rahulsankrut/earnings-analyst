@@ -20,15 +20,38 @@ Intelligence Extractor (batch pipeline)
     └── competitor_extraction_loop (LoopAgent, 2 passes, 33 searches)
         └── competitor_intelligence_extractor → saves competitor_report.md to GCS
 
-Phoenix (C-Suite advisor)
+Phoenix (C-Suite advisor — runs a coaching journey)
 ├── Tools: read_intelligence_report, read_analyst_report, read_competitor_report
 │         search_historical_documents, search_competitor_documents
-└── briefing_pipeline (SequentialAgent)
-    ├── briefing_synthesizer  → structured question bank + coaching guide
-    └── verification_loop     → fact-checks every cited number
+├── guidance_credibility_module ┐
+├── analyst_ambush_module       │ each: LoopAgent(3 passes)
+├── competitor_landmines_module │   └── Sequential(synthesizer → verifier)
+├── financial_deep_dive_module  ┘
+└── qa_drill_module (interactive — no verification loop)
 ```
 
+Search counts scale with the active profile: each competitor adds 22 queries
+plus one per declared segment. Alphabet with two competitors runs 121 searches
+against 94 for a single-competitor profile.
+
 Both agents deploy independently to Vertex AI Agent Engine and can be triggered on demand.
+
+### The coaching journey
+
+Phoenix does not hand over one long report. It reads the quarter's numbers,
+**recommends** where to start based on what it actually finds there, and then
+runs focused modules the executive picks — in any order, stopping whenever they
+are ready.
+
+Each module reads only the intelligence it needs, which is what keeps context
+bounded as competitors are added.
+
+**Verification is corrective, not advisory.** Each module runs
+synthesise → fact-check → revise, looping up to three times. The verifier
+escalates only when nothing is left unresolved; anything it cannot confirm is
+carried into the output marked `[UNVERIFIED]`. An earlier design ran
+verification once and never acted on its findings, so a wrong figure could reach
+the executive.
 
 ---
 
@@ -295,6 +318,20 @@ Changing profiles does **not** change the data stores. Both agents read
 whatever is in `EARNINGS_DATA_STORE_ID` and `COMPETITOR_DATA_STORE_ID`, so a
 new company also needs its filings ingested (see Step 4). All competitors
 share the single competitor data store; searches are scoped by name.
+
+### Reports are namespaced per profile
+
+Extracted reports are written to `reports/{COMPANY_PROFILE}/` inside
+`INTELLIGENCE_BUCKET`, so two companies can share a bucket without colliding.
+Every report is stamped with the profile and company name that produced it, and
+Phoenix refuses to brief from a report whose profile does not match the active
+one — it says so instead of silently presenting another company's intelligence.
+
+Reports older than 45 days are flagged as stale, and Phoenix surfaces that
+warning before advising.
+
+**Switching profiles requires re-running the extraction pipeline.** A new
+profile starts with an empty report prefix until it does.
 
 ## Deleting deployed agents
 
