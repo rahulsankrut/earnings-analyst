@@ -54,6 +54,10 @@ REQUIREMENTS = [
 RUNTIME_ENV_VARS = [
     "EARNINGS_DATA_STORE_ID",
     "COMPETITOR_DATA_STORE_ID",
+    # Without these the deployed agent queries the bare data stores, which
+    # return titles and links but no extractive text or page numbers.
+    "EARNINGS_SEARCH_ENGINE_ID",
+    "COMPETITOR_SEARCH_ENGINE_ID",
     "DATA_STORE_LOCATION",
     "INTELLIGENCE_BUCKET",
     "PHOENIX_MODEL",

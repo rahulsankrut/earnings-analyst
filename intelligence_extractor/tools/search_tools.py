@@ -7,7 +7,12 @@ extraction prioritizes completeness over latency.
 
 import os
 import logging
+from google.api_core.exceptions import FailedPrecondition
 from google.cloud import discoveryengine_v1 as discoveryengine
+
+# Serving-config and content-spec construction are shared with the Phoenix
+# search tools; only the page size differs between batch and live search.
+from phoenix.tools.document_tools import _content_spec, _serving_config
 
 logger = logging.getLogger(__name__)
 
@@ -27,19 +32,27 @@ def _search_data_store(query: str, data_store_id: str) -> str:
     """
     try:
         client = discoveryengine.SearchServiceClient()
-        serving_config = (
-            f"projects/{PROJECT_ID}/locations/{DATA_STORE_LOCATION}"
-            f"/collections/default_collection/dataStores/{data_store_id}"
-            f"/servingConfigs/default_serving_config"
-        )
+        serving_config = _serving_config(data_store_id)
 
-        request = discoveryengine.SearchRequest(
-            serving_config=serving_config,
-            query=query,
-            page_size=BATCH_PAGE_SIZE,
-        )
+        def _run(extractive: bool):
+            return client.search(
+                discoveryengine.SearchRequest(
+                    serving_config=serving_config,
+                    query=query,
+                    page_size=BATCH_PAGE_SIZE,
+                    content_search_spec=_content_spec(extractive),
+                )
+            )
 
-        response = client.search(request)
+        try:
+            response = _run(extractive=True)
+        except FailedPrecondition:
+            logger.info(
+                "Extractive content unavailable for %s; using snippets only.",
+                data_store_id,
+            )
+            response = _run(extractive=False)
+
         results = []
 
         for result in response.results:

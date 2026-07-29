@@ -1,5 +1,6 @@
 import os
 import logging
+from google.api_core.exceptions import FailedPrecondition
 from google.cloud import discoveryengine_v1 as discoveryengine
 
 logger = logging.getLogger(__name__)
@@ -9,24 +10,83 @@ DATA_STORE_LOCATION = os.environ.get("DATA_STORE_LOCATION", "global")
 EARNINGS_DATA_STORE_ID = os.environ.get("EARNINGS_DATA_STORE_ID", "")
 COMPETITOR_DATA_STORE_ID = os.environ.get("COMPETITOR_DATA_STORE_ID", "")
 
+# Optional search engines (apps) sitting over the data stores. Extractive
+# answers/segments — and the page numbers the citation format depends on — are
+# Enterprise-edition features that can only be enabled at the engine level, so
+# querying the engine returns far richer text than the bare data store.
+EARNINGS_SEARCH_ENGINE_ID = os.environ.get("EARNINGS_SEARCH_ENGINE_ID", "")
+COMPETITOR_SEARCH_ENGINE_ID = os.environ.get("COMPETITOR_SEARCH_ENGINE_ID", "")
+
+_ENGINE_FOR_STORE = {
+    EARNINGS_DATA_STORE_ID: EARNINGS_SEARCH_ENGINE_ID,
+    COMPETITOR_DATA_STORE_ID: COMPETITOR_SEARCH_ENGINE_ID,
+}
+
+
+def _serving_config(data_store_id: str) -> str:
+    """Prefers the engine serving config, falling back to the data store."""
+    base = (
+        f"projects/{PROJECT_ID}/locations/{DATA_STORE_LOCATION}"
+        f"/collections/default_collection"
+    )
+    engine_id = _ENGINE_FOR_STORE.get(data_store_id, "")
+    if engine_id:
+        return f"{base}/engines/{engine_id}/servingConfigs/default_serving_config"
+    return f"{base}/dataStores/{data_store_id}/servingConfigs/default_serving_config"
+
+
+def _content_spec(extractive: bool):
+    """Asks the API for the text shapes this module knows how to parse.
+
+    Without a content_search_spec the API returns only document metadata —
+    title and link — and every extraction path below silently finds nothing.
+    """
+    if not extractive:
+        return discoveryengine.SearchRequest.ContentSearchSpec(
+            snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
+                return_snippet=True
+            ),
+        )
+    return discoveryengine.SearchRequest.ContentSearchSpec(
+        snippet_spec=discoveryengine.SearchRequest.ContentSearchSpec.SnippetSpec(
+            return_snippet=True
+        ),
+        extractive_content_spec=(
+            discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
+                max_extractive_answer_count=1,
+                max_extractive_segment_count=2,
+            )
+        ),
+    )
+
 
 def _search_data_store(query: str, data_store_id: str) -> str:
     """Internal helper to query a Vertex AI Search data store."""
     try:
         client = discoveryengine.SearchServiceClient()
-        serving_config = (
-            f"projects/{PROJECT_ID}/locations/{DATA_STORE_LOCATION}"
-            f"/collections/default_collection/dataStores/{data_store_id}"
-            f"/servingConfigs/default_serving_config"
-        )
+        serving_config = _serving_config(data_store_id)
 
-        request = discoveryengine.SearchRequest(
-            serving_config=serving_config,
-            query=query,
-            page_size=5,
-        )
+        def _run(extractive: bool):
+            return client.search(
+                discoveryengine.SearchRequest(
+                    serving_config=serving_config,
+                    query=query,
+                    page_size=5,
+                    content_search_spec=_content_spec(extractive),
+                )
+            )
 
-        response = client.search(request)
+        try:
+            response = _run(extractive=True)
+        except FailedPrecondition:
+            # Standard-edition store: extractive answers are unavailable, but
+            # snippets still are. Degrade rather than returning nothing.
+            logger.info(
+                "Extractive content unavailable for %s; using snippets only.",
+                data_store_id,
+            )
+            response = _run(extractive=False)
+
         results = []
 
         for result in response.results:
