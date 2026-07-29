@@ -1,6 +1,8 @@
 import os
+from functools import cached_property
 
 from google.adk.models import Gemini
+from google.genai import types as genai_types
 from google.genai.types import HttpRetryOptions
 
 from company_profiles import load_profile
@@ -17,9 +19,46 @@ _RETRY = HttpRetryOptions(
     http_status_codes=[429, 500, 502, 503, 504],
 )
 
+# Ceiling on a single model call, in milliseconds. Generous, because an
+# extractor generating a 40KB report legitimately takes minutes — this exists
+# to bound a stall, not to police normal latency.
+_REQUEST_TIMEOUT_MS = 600_000
+
+
+class _TimeoutGemini(Gemini):
+    """Gemini with a request timeout.
+
+    ADK builds its client as HttpOptions(headers, retry_options, base_url) and
+    never sets a timeout, so a connection that stalls waits indefinitely.
+    Observed live: an extraction run sat at 0% CPU for 107 minutes mid-stage
+    before being killed. Retries do not help here — there is nothing to retry
+    while the original call is still open, which is why the retry_options
+    above were not enough on their own.
+    """
+
+    @cached_property
+    def api_client(self):
+        from google.genai import Client
+
+        # _tracking_headers is ADK-internal; degrade rather than break if a
+        # future version renames it.
+        headers = (
+            self._tracking_headers()
+            if hasattr(self, "_tracking_headers")
+            else None
+        )
+        return Client(
+            http_options=genai_types.HttpOptions(
+                headers=headers,
+                retry_options=self.retry_options,
+                base_url=self.base_url,
+                timeout=_REQUEST_TIMEOUT_MS,
+            )
+        )
+
 
 def _model(name: str) -> Gemini:
-    return Gemini(model=name, retry_options=_RETRY)
+    return _TimeoutGemini(model=name, retry_options=_RETRY)
 
 
 # C-Suite Prep Agent Package — Let Agent Engine identify it
