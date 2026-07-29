@@ -56,10 +56,12 @@ The `phoenix` package contains the interactive agent that the C-Suite executive 
 ```text
 Phoenix (Root Orchestrator — recommends, routes, narrates)
 ├── guidance_credibility_module ┐
-├── analyst_ambush_module       │ LoopAgent(max_iterations=3)
-├── competitor_landmines_module │   └── SequentialAgent
-├── financial_deep_dive_module  ┘         ├── <key>_synthesizer  → state["module_<key>"]
-│                                          └── <key>_verifier     → state["verification_report"]
+├── analyst_ambush_module       │ SequentialAgent
+├── competitor_landmines_module │   ├── LoopAgent(max_iterations=2)
+├── financial_deep_dive_module  ┘   │     └── SequentialAgent
+│                                   │           ├── <key>_synthesizer  → state["module_<key>"]
+│                                   │           └── <key>_verifier     → state["verification_report"]
+│                                   └── <key>_reviser  → state["module_<key>"]  (final word)
 └── qa_drill_module (LlmAgent — interactive, unverified by design)
 ```
 
@@ -75,10 +77,10 @@ the analyst module reads the analyst report and nothing else.
 *   **How it works**: ADK's built-in agent transfer does the routing; there is no hand-written dispatcher.
 *   **Benefit**: Context stays bounded as competitors are added. Previously a single synthesiser loaded all three uncapped reports at once.
 
-#### 2. `LoopAgent` + `SequentialAgent` (The Corrective Auditor)
-Each verified module loops synthesise → fact-check → revise, up to three passes.
-*   **How it works**: The `SequentialAgent` guarantees the synthesiser runs before the verifier. The verifier escalates — exiting the loop — **only** when no claim is left unresolved. Otherwise the loop runs again and the synthesiser rewrites against `state["verification_report"]`.
-*   **Benefit**: Verification findings are acted on. An earlier design ran verification once with `max_iterations=1` and nothing ever consumed its output, so a `DISCREPANCY` could still reach the executive. Claims that remain unconfirmable are carried through marked `[UNVERIFIED]`.
+#### 2. `LoopAgent` + reviser (The Corrective Auditor)
+Each verified module is `Sequential(LoopAgent(synthesise → fact-check), reviser)`.
+*   **How it works**: Inside the loop, the inner `SequentialAgent` guarantees the synthesiser runs before the verifier. The verifier escalates — exiting the loop — **only** when no claim is left unresolved; otherwise the loop runs again and the synthesiser rewrites against `state["verification_report"]`. But a `LoopAgent` always *ends* on its last member, which here is the synthesiser — so without a further step, the final draft the executive reads was never itself fact-checked. The reviser runs once, after the loop, reading the newest draft and the newest findings from state (via a state-aware callable instruction, not a static prompt) and has the actual final word: it applies every outstanding correction, states its confidence honestly — including saying plainly when no findings exist to apply — and renders the navigation footer, since it produces the text that ends the turn.
+*   **Benefit**: Verification findings are acted on, and the thing the executive reads has actually been checked. Two earlier designs both fell short here: one ran verification once with `max_iterations=1` and never consumed its output at all; a later one closed that loop but still let the last, unverified draft win by ending on the synthesiser. Claims that remain unconfirmable are carried through marked `[UNVERIFIED]`.
 
 #### 3. Profile-namespaced reports (Multi-tenancy Safety)
 Reports live under `reports/{profile}/` and are stamped with the profile that produced them.

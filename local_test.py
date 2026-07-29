@@ -50,23 +50,32 @@ def main():
 
         if not module.verified:
             # Interactive modules are conversational — no verification loop.
-            assert not isinstance(agent, LoopAgent), (
+            assert not isinstance(agent, (LoopAgent, SequentialAgent)), (
                 f"{agent.name} should not be wrapped in a verification loop"
             )
             print(f"  {agent.name}: interactive (no verification loop)")
             continue
 
-        assert isinstance(agent, LoopAgent), f"{agent.name} must be a LoopAgent"
-        # >1 is what makes verification corrective rather than advisory: the
-        # synthesiser gets to revise against the verification report.
-        assert agent.max_iterations > 1, (
-            f"{agent.name} has max_iterations={agent.max_iterations}; the "
+        # A LoopAgent alone always ends on its last sub-agent, which here is
+        # the synthesiser — so the final draft would never itself be
+        # fact-checked. The module is therefore Sequential(LoopAgent, reviser):
+        # the loop iterates synthesise/verify, and the reviser has the final
+        # word, applying the newest findings to the newest draft.
+        assert isinstance(agent, SequentialAgent), (
+            f"{agent.name} must be Sequential(verify_loop, reviser), got "
+            f"{type(agent).__name__}"
+        )
+        loop, reviser = agent.sub_agents
+
+        assert isinstance(loop, LoopAgent), f"{loop.name} must be a LoopAgent"
+        assert loop.max_iterations > 1, (
+            f"{loop.name} has max_iterations={loop.max_iterations}; the "
             f"verification loop cannot correct anything with only one pass"
         )
 
-        (inner,) = agent.sub_agents
+        (inner,) = loop.sub_agents
         assert isinstance(inner, SequentialAgent), (
-            f"{agent.name} must wrap a SequentialAgent"
+            f"{loop.name} must wrap a SequentialAgent"
         )
         synth, verifier = inner.sub_agents
         assert synth.output_key == module.state_key, (
@@ -74,11 +83,23 @@ def main():
         )
         assert verifier.output_key == "verification_report"
 
-        print(
-            f"  {agent.name}: LoopAgent(max_iterations={agent.max_iterations})"
-            f" -> [{synth.name} -> {verifier.name}]"
+        # The reviser must write the same state key as the synthesiser — it
+        # is the last writer, so its output is what the executive reads.
+        assert reviser.output_key == module.state_key, (
+            f"{reviser.name} writes {reviser.output_key}, expected "
+            f"{module.state_key} — the reviser must have the final word"
         )
-        print(f"      writes state[{module.state_key!r}]")
+        assert not reviser.tools, (
+            f"{reviser.name} has tools; it should only edit the existing "
+            f"draft, not perform new searches that bypass verification"
+        )
+
+        print(
+            f"  {agent.name}: Sequential("
+            f"LoopAgent(max_iterations={loop.max_iterations})"
+            f"[{synth.name} -> {verifier.name}], {reviser.name})"
+        )
+        print(f"      final output in state[{module.state_key!r}]")
 
     print("\n--- All checks passed! ---")
     print("\nArchitecture:")

@@ -24,9 +24,9 @@ Phoenix (C-Suite advisor — runs a coaching journey)
 ├── Tools: read_intelligence_report, read_analyst_report, read_competitor_report
 │         search_historical_documents, search_competitor_documents
 ├── guidance_credibility_module ┐
-├── analyst_ambush_module       │ each: LoopAgent(3 passes)
-├── competitor_landmines_module │   └── Sequential(synthesizer → verifier)
-├── financial_deep_dive_module  ┘
+├── analyst_ambush_module       │ each: Sequential(
+├── competitor_landmines_module │         LoopAgent(2 passes)[synthesizer → verifier],
+├── financial_deep_dive_module  ┘         reviser )
 └── qa_drill_module (interactive — no verification loop)
 ```
 
@@ -46,12 +46,16 @@ are ready.
 Each module reads only the intelligence it needs, which is what keeps context
 bounded as competitors are added.
 
-**Verification is corrective, not advisory.** Each module runs
-synthesise → fact-check → revise, looping up to three times. The verifier
-escalates only when nothing is left unresolved; anything it cannot confirm is
-carried into the output marked `[UNVERIFIED]`. An earlier design ran
-verification once and never acted on its findings, so a wrong figure could reach
-the executive.
+**Verification is corrective, not advisory.** Each module runs a
+synthesise ↔ fact-check loop (up to 2 passes), then a reviser has the final
+word. The loop alone was not enough: `LoopAgent(synthesise, verify)` always
+ends on a synthesise step, so the draft the executive actually reads was never
+itself checked. The reviser runs after the loop, applies the newest
+verification findings to the newest draft, and states its confidence — including
+saying plainly when no findings exist to apply, rather than implying a check
+that did not happen. Anything still unresolved is carried through marked
+`[UNVERIFIED]`. An earlier design ran verification once and never acted on its
+findings at all, so a wrong figure could reach the executive outright.
 
 ---
 

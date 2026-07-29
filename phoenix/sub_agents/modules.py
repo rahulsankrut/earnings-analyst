@@ -226,8 +226,68 @@ anything it could not confirm. Do not silently keep a disputed number.
 """
 
 
+def _reviser_instruction(module: CoachingModule) -> Callable:
+    """Builds the reviser's instruction, reading the draft and findings from state.
+
+    A callable rather than a static string so the navigation footer can name
+    what the executive has actually completed this session.
+    """
+
+    def _build(ctx) -> str:
+        state = ctx.state
+        draft = str(state.get(module.state_key, "")).strip()
+        findings = str(state.get("verification_report", "")).strip()
+
+        done = [m.title for m in MODULES if str(state.get(m.state_key, "")).strip()]
+        remaining = [m.title for m in MODULES if m.title not in done]
+
+        findings_block = (
+            f"## Verification findings\n\n{findings}"
+            if findings
+            else "## Verification findings\n\nNone were recorded for this draft. "
+            "Say so in the confidence line rather than implying it was checked."
+        )
+
+        return f"""You are the final editor for the {module.title} module. You produce
+what the executive actually reads — nothing runs after you.
+
+## The draft
+
+{draft}
+
+{findings_block}
+
+## Your job
+
+1. Apply **every** "Action needed" from the findings above. Correct the figures
+   it corrected. Remove what it says to remove. Anything it could not confirm
+   keeps an inline `[UNVERIFIED]` next to the number — never quietly drop the
+   marker, and never present a disputed figure as settled.
+2. Otherwise preserve the draft. You are an editor, not a re-writer: keep its
+   structure, tables, headings and source footers intact.
+3. Add a short confidence line directly under the `## What matters` block,
+   stating how many claims were checked and how many remain unverified.
+4. End with exactly this navigation block, and nothing after it:
+
+---
+**Completed:** {', '.join(done) or 'this module'}
+**Still available:** {', '.join(remaining) or 'none — you have covered everything'}
+
+Tell me which you would like next, or say you are done and I will close out
+with what matters most.
+
+## Rules
+
+Output the finished section only. No preamble, no commentary on your editing,
+no meta-explanation. Do not invent numbers — you have no search tools, so
+anything not in the draft or the findings cannot be added.
+"""
+
+    return _build
+
+
 def _build_module_agent(module: CoachingModule):
-    """Builds one module: a verified loop, or a plain interactive agent."""
+    """Builds one module: a verified pipeline, or a plain interactive agent."""
     synthesizer = Agent(
         name=f"{module.key}_synthesizer",
         model=FLASH_MODEL,
@@ -244,21 +304,43 @@ def _build_module_agent(module: CoachingModule):
         synthesizer.name = module.agent_name
         return synthesizer
 
-    return LoopAgent(
+    # A LoopAgent over (synthesise, verify) always *ends* on a synthesise step,
+    # so the last thing produced was never fact-checked — which defeats the
+    # point. The reviser runs after the loop and has the final word, applying
+    # the newest findings to the newest draft. It has no tools, so it is cheap
+    # and cannot introduce new unverified claims.
+    reviser = Agent(
+        name=f"{module.key}_reviser",
+        model=FLASH_MODEL,
+        description=f"Applies verification findings to the {module.title} section.",
+        instruction=_reviser_instruction(module),
+        output_key=module.state_key,
+        before_model_callback=rate_limit_callback,
+    )
+
+    return SequentialAgent(
         name=module.agent_name,
-        max_iterations=3,
         description=module.menu_summary,
         sub_agents=[
-            SequentialAgent(
-                name=f"{module.key}_synthesis_pass",
+            LoopAgent(
+                name=f"{module.key}_verify_loop",
+                max_iterations=2,
+                description=f"Synthesise and fact-check the {module.title} section.",
                 sub_agents=[
-                    synthesizer,
-                    build_verification_agent(module.key, module.state_key),
+                    SequentialAgent(
+                        name=f"{module.key}_synthesis_pass",
+                        sub_agents=[
+                            synthesizer,
+                            build_verification_agent(module.key, module.state_key),
+                        ],
+                        description=(
+                            f"Synthesises the {module.title} section, then "
+                            f"fact-checks it."
+                        ),
+                    )
                 ],
-                description=(
-                    f"Synthesises the {module.title} section, then fact-checks it."
-                ),
-            )
+            ),
+            reviser,
         ],
     )
 

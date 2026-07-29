@@ -8,7 +8,17 @@ unresolved. Anything outstanding means it does not escalate, the enclosing
 LoopAgent runs another iteration, and the synthesiser revises using the
 verification report. That feedback path is the whole point of the loop —
 previously verification ran once and its findings were never acted on.
+
+The instruction is a callable that reads the draft directly out of session
+state, rather than a static string that only names the state key in prose.
+Telling the model "the draft is available in state[...]" and trusting it to
+find that content in its own conversation history is NOT reliable — live
+testing against real data showed the model sometimes cannot locate it and
+asks the user to supply it instead, stalling the loop. Embedding the actual
+draft text in the instruction removes that ambiguity entirely.
 """
+
+from typing import Callable
 
 from google.adk.agents import Agent
 
@@ -20,10 +30,17 @@ from ..tools.document_tools import (
 from ..callbacks import rate_limit_callback
 
 
-def _prompt(draft_key: str) -> str:
-    return f"""You are the Verification Agent — a rigorous fact-checker whose sole purpose is to protect the C-Suite from quoting incorrect numbers on an earnings call.
+def _prompt(draft_key: str) -> Callable:
+    def _build(ctx) -> str:
+        draft = str(ctx.state.get(draft_key, "")).strip()
+        draft_block = draft or "[No draft found in state — report this as a failure rather than guessing.]"
+        return f"""You are the Verification Agent — a rigorous fact-checker whose sole purpose is to protect the C-Suite from quoting incorrect numbers on an earnings call.
 
-You receive a draft section (available in the session as state["{draft_key}"]). Your job is to verify every specific numerical claim, percentage, dollar figure, and factual assertion against the source documents.
+## The draft to verify
+
+{draft_block}
+
+Your job is to verify every specific numerical claim, percentage, dollar figure, and factual assertion in the draft above against the source documents.
 
 ## When to escalate — read carefully
 
@@ -86,6 +103,8 @@ For each claim, report:
 - **Do not verify opinions or predictions.** Only verify factual claims — numbers, quotes, attributions. The predicted questions themselves are not verifiable.
 - **Be thorough.** Check every single number. Missing even one wrong figure could be damaging.
 """
+
+    return _build
 
 
 def build_verification_agent(module_key: str, draft_key: str) -> Agent:

@@ -4,7 +4,9 @@ Deterministic checks on wiring and string generation — no model calls, no GCP.
 """
 
 import pytest
+from google.adk.agents import LoopAgent, SequentialAgent
 
+from phoenix.agent import phoenix_agent
 from phoenix.sub_agents.modules import MODULES, MODULES_BY_KEY, menu_markdown
 from phoenix.tools import intelligence_store
 from phoenix.tools.intelligence_store import _provenance_banner, _report_age_days
@@ -52,6 +54,151 @@ def test_menu_lists_every_module():
 def test_registry_lookup_matches():
     for key, module in MODULES_BY_KEY.items():
         assert module.key == key
+
+
+# ---------------------------------------------------------------------------
+# Reviser: the fix for "the loop's last output was never verified"
+#
+# LoopAgent(synthesise, verify) always ends on a synthesise step, so without a
+# step after the loop, the draft the executive actually reads was never
+# fact-checked. Each verified module is Sequential(verify_loop, reviser) so
+# the reviser — which reads the newest draft and the newest findings — has
+# the final word.
+# ---------------------------------------------------------------------------
+
+
+def _verified_module_agent(module_key):
+    agent = next(a for a in phoenix_agent.sub_agents if a.name.startswith(module_key))
+    assert isinstance(agent, SequentialAgent), (
+        f"{agent.name} is {type(agent).__name__}, expected SequentialAgent — "
+        f"has the reviser-after-loop fix regressed?"
+    )
+    loop, reviser = agent.sub_agents
+    return loop, reviser
+
+
+def _verifier_agent(module_key):
+    loop, _ = _verified_module_agent(module_key)
+    (inner,) = loop.sub_agents
+    _, verifier = inner.sub_agents
+    return verifier
+
+
+class _FakeReadonlyContext:
+    """Minimal stand-in for ADK's ReadonlyContext — just needs .state."""
+
+    def __init__(self, state: dict):
+        self.state = state
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_reviser_runs_after_the_loop_not_inside_it(module):
+    loop, reviser = _verified_module_agent(module.key)
+    assert isinstance(loop, LoopAgent)
+    # The reviser must not be one of the agents the loop iterates — it runs
+    # exactly once, after the loop has finished, not on every iteration.
+    (inner,) = loop.sub_agents
+    loop_members = {a.name for a in inner.sub_agents}
+    assert reviser.name not in loop_members
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_reviser_has_the_final_word(module):
+    """The reviser must write the module's real output key.
+
+    If it wrote anything else, the loop's last (unverified) synthesiser draft
+    would remain in state and reach the executive unchecked.
+    """
+    _, reviser = _verified_module_agent(module.key)
+    assert reviser.output_key == module.state_key
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_reviser_has_no_tools(module):
+    """No tools means no new unverified claims can enter at the last step."""
+    _, reviser = _verified_module_agent(module.key)
+    assert not reviser.tools
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_reviser_instruction_is_state_aware(module):
+    """A static string could not read the draft or verification findings —
+    the instruction must be a callable that reads ctx.state."""
+    _, reviser = _verified_module_agent(module.key)
+    assert callable(reviser.instruction)
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_verifier_instruction_is_state_aware(module):
+    """The verifier must read the draft's actual text out of state, not just
+    describe where it lives in prose. A model told "the draft is in
+    state[...]" cannot reliably find it in its own conversation history —
+    live testing showed it sometimes asks the user to supply the draft
+    instead, stalling the loop entirely."""
+    verifier = _verifier_agent(module.key)
+    assert callable(verifier.instruction)
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_instruction_callables_actually_return_text(module):
+    """Calls the instruction callables directly, the way ADK would.
+
+    Guards against exactly the bug this suite exists to catch: a callable
+    that is present and correctly typed but returns None because its inner
+    function was defined and never returned. That bug does not fail an
+    isinstance/callable check — it only surfaces as a pydantic ValidationError
+    deep in Agent construction, or silently at runtime.
+    """
+    _, reviser = _verified_module_agent(module.key)
+    verifier = _verifier_agent(module.key)
+
+    ctx = _FakeReadonlyContext(
+        {module.state_key: "Draft text.", "verification_report": "Some findings."}
+    )
+    for name, instruction in (("reviser", reviser.instruction), ("verifier", verifier.instruction)):
+        result = instruction(ctx)
+        assert isinstance(result, str) and result.strip(), (
+            f"{module.key} {name} instruction returned {result!r} instead of text"
+        )
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_verifier_embeds_the_actual_draft_text(module):
+    """The regression this test targets directly: does calling the verifier's
+    instruction with a draft in state produce a prompt containing that draft's
+    actual text, not just a reference to where it should be found?"""
+    verifier = _verifier_agent(module.key)
+    marker = "UNIQUE-DRAFT-CONTENT-Q3-REVENUE-4POINT19-BILLION"
+    ctx = _FakeReadonlyContext({module.state_key: marker})
+    prompt = verifier.instruction(ctx)
+    assert marker in prompt
+
+
+@pytest.mark.parametrize(
+    "module", [m for m in MODULES if m.verified], ids=lambda m: m.key
+)
+def test_verifier_handles_missing_draft_without_crashing(module):
+    """An empty or missing draft must not raise — it is a real (if unlikely)
+    state, since the verifier always runs after the synthesiser but a future
+    change could break that ordering."""
+    verifier = _verifier_agent(module.key)
+    ctx = _FakeReadonlyContext({})
+    result = verifier.instruction(ctx)
+    assert isinstance(result, str) and result.strip()
 
 
 # ---------------------------------------------------------------------------
