@@ -32,7 +32,45 @@ def _find_agent_wheel() -> str:
         )
     if len(wheels) > 1:
         print(f"  ⚠️  Multiple wheels in dist/ — using newest: {wheels[0]}")
+
+    _assert_wheel_is_current(wheels[0])
     return wheels[0]
+
+
+def _assert_wheel_is_current(wheel: str) -> None:
+    """Refuses to deploy a wheel older than the source it is built from.
+
+    The agent is serialised with cloudpickle, which stores references by name
+    and resolves them inside the container against the shipped wheel. So a
+    stale wheel does not fail at build time — it fails minutes later as an
+    opaque "failed to start and cannot serve traffic", and the real cause is
+    buried in the container logs. This exact failure cost a full deploy cycle:
+    the wheel predated a new class, and the container died with
+    "module 'phoenix' has no attribute '_TimeoutGemini'".
+    """
+    wheel_mtime = os.path.getmtime(wheel)
+    newer = []
+    for package in ("phoenix", "intelligence_extractor", "company_profiles"):
+        for root, _, files in os.walk(package):
+            if "__pycache__" in root:
+                continue
+            for name in files:
+                if not name.endswith((".py", ".json")):
+                    continue
+                path = os.path.join(root, name)
+                if os.path.getmtime(path) > wheel_mtime:
+                    newer.append(path)
+
+    if newer:
+        listed = "\n      ".join(sorted(newer)[:10])
+        more = f"\n      ... and {len(newer) - 10} more" if len(newer) > 10 else ""
+        raise RuntimeError(
+            f"{wheel} is older than {len(newer)} source file(s):\n"
+            f"      {listed}{more}\n"
+            f"\n    Run `poetry build` first. Deploying now would ship stale "
+            f"code and fail inside the container with an unrelated-looking "
+            f"error."
+        )
 
 
 AGENT_WHL_FILE = _find_agent_wheel()
