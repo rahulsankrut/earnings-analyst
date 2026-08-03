@@ -2,6 +2,10 @@
 
 This document provides a detailed breakdown of the multi-agent architecture implemented in the Phoenix Earnings Analyst Agent project. It highlights the use of Google Agent Development Kit (ADK) primitives to create a robust, two-stage financial intelligence pipeline.
 
+> **Scope:** this document describes the **current, as-built prototype**. For the enterprise production
+> target state — evals, query reconstruction and caching, guardrails, automated ingestion, and platform
+> concerns — see [`docs/TARGET_STATE_ARCHITECTURE.md`](docs/TARGET_STATE_ARCHITECTURE.md).
+
 ---
 
 ## High-Level Architecture: Two-Stage Pipeline

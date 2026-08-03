@@ -6,6 +6,12 @@ Phoenix is a Google ADK multi-agent system that prepares C-Suite executives for 
 
 2. **Phoenix** (interactive, live during prep) — reads the pre-extracted intelligence, analyzes the current quarter's financials that the executive uploads, generates a tiered question bank with defensible responses, and coaches the executive through interactive Q&A simulation.
 
+> **Taking this to production?** This repository is a working prototype. See
+> [`docs/TARGET_STATE_ARCHITECTURE.md`](docs/TARGET_STATE_ARCHITECTURE.md) for the enterprise target-state
+> design — evaluation framework, query reconstruction and caching, guardrails (Model Armor), automated
+> document ingestion (SharePoint + external crawl), and the cross-cutting concerns (tenancy, IAM, CI/CD,
+> observability, cost) needed for production. It also catalogues the known gaps in the current code.
+
 ---
 
 ## Architecture
